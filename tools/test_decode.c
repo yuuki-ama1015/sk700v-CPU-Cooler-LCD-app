@@ -52,16 +52,46 @@ int main(void) {
     check_d("energy_unit silvermont", energy_unit(0x00000505u, CPU_INTEL, 6, 0x37), 32.0e-6);
     check_d("energy_unit amd 16", energy_unit(0x000A1003u, CPU_AMD, 0x19, 0x21), 1.0 / 65536.0);
 
-    // --- Frames must match what MasterCraft sent (captured with hid_sniff.js) ---
+    // --- float conversion truncates like MasterCraft ---
+    g_total++; if (float_bits_trunc(114.8) != 0x42E59999u) { g_fail++; printf("FAIL float 114.8 -> %08lx\n", float_bits_trunc(114.8)); }
+    g_total++; if (float_bits_trunc(113.0) != 0x42E20000u) { g_fail++; printf("FAIL float 113.0\n"); }
+    g_total++; if (float_bits_trunc(55.0) != 0x425C0000u) { g_fail++; printf("FAIL float 55.0\n"); }
+    g_total++; if (float_bits_trunc(0.0) != 0) { g_fail++; printf("FAIL float 0\n"); }
+
+    // --- second power byte: every (PW, PW2) pair MasterCraft sent ---
+    {
+        static const int pairs[][2] = {{19, 18}, {20, 19}, {21, 20}, {22, 20}, {27, 25}, {28, 26}, {29, 27}, {30, 28},
+                                       {31, 29}, {32, 30}, {33, 31}, {34, 32}, {35, 33}, {36, 34}, {37, 35}, {38, 36},
+                                       {39, 37}, {40, 38}, {41, 39}, {43, 40}, {44, 41}, {45, 42}, {68, 64}, {69, 65}};
+        int i;
+        for (i = 0; i < (int)(sizeof pairs / sizeof pairs[0]); i++) {
+            make_sensor_data(d, 50, pairs[i][0], 10, 4000, FALSE);
+            g_total++;
+            if (d[3] != pairs[i][0] || d[4] != pairs[i][1]) { g_fail++; printf("FAIL pw2 %d -> %d (want %d)\n", d[3], d[4], pairs[i][1]); }
+        }
+    }
+
+    // --- Frames must match what MasterCraft sent (captured with hid_sniff.js / settings_probe.js) ---
     make_report(rep, 64, a, 2);
-    check_hex("frame A", rep, "106801090203017816", 9);
+    check_hex("frame A (alert on)", rep, "106801090203017816", 9);
+    a[1] = 0x00;
+    make_report(rep, 64, a, 2);
+    check_hex("frame A (alert off)", rep, "106801090203007716", 9);
+    a[1] = 0x01;
     // CPU Power 32.37W -> 33, Temperature 54.xx -> 55, Usage 19.57% -> 20, Clock 4841.27 -> 4842
-    make_sensor_data(d, 54.25, 32.37, 19.57, 4841.27);
+    make_sensor_data(d, 54.25, 32.37, 19.57, 4841.27, FALSE);
     make_report(rep, 64, d, 13);
     check_hex("frame B idle", rep, "106801090d010200211f00425c00001412ea7016", 20);
     // under load: 67.03W -> 68, 63.13C -> 64, 100% , 4641.63 -> 4642
-    make_sensor_data(d, 63.13, 67.03, 100.0, 4641.63);
+    make_sensor_data(d, 63.13, 67.03, 100.0, 4641.63, FALSE);
     check_hex("data B load", d, "01020044400042800000641222", 13);
+    // Fahrenheit: 46C -> 114.8F, unit flag 01
+    make_sensor_data(d, 45.5, 18.5, 7.2, 3768.3, TRUE);
+    make_report(rep, 64, d, 13);
+    check_hex("frame B fahrenheit", rep, "106801090d01020013120142e59999080eb9d016", 20);
+    // screen off: fixed data, frame A is not sent
+    make_report(rep, 64, SCREEN_OFF_DATA, 13);
+    check_hex("frame B screen off", rep, "106801090d01000064320042700000280e100e16", 20);
     // padding up to the output report length
     make_report(rep, 64, a, 2);
     g_total++;

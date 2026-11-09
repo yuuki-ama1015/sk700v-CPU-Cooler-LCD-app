@@ -129,6 +129,22 @@ static double intel_ratio(ULONG64 v, int family, int model) {
     return (double)((v >> 8) & 0xFF);  // Sandy Bridge 以降
 }
 
+// double -> float32 のビット列。MasterCraft と同じく仮数部を丸めずに切り捨てる
+// (例: 114.8 は 0x42E59999。四捨五入なら 0x42E5999A)
+static DWORD float_bits_trunc(double x) {
+    ULONG64 d;
+    DWORD sign;
+    int e;
+    memcpy(&d, &x, 8);
+    sign = (DWORD)(d >> 63) << 31;
+    e = (int)((d >> 52) & 0x7FF);
+    if (e == 0) return sign;
+    e = e - 1023 + 127;
+    if (e <= 0) return sign;
+    if (e >= 255) return sign | 0x7F800000u;
+    return sign | ((DWORD)e << 23) | (DWORD)((d & 0xFFFFFFFFFFFFFull) >> 29);
+}
+
 // RAPL 電力単位レジスタ -> 1 カウントあたりのジュール
 static double energy_unit(ULONG64 v, int vendor, int family, int model) {
     DWORD esu = (DWORD)(v >> 8) & 0x1F;
@@ -139,21 +155,23 @@ static double energy_unit(ULONG64 v, int vendor, int family, int model) {
 }
 
 // 液晶用データ (フレーム B の中身 13 バイト)。MasterCraft と同じく各値は切り上げ
-static void make_sensor_data(BYTE b[13], double temp, double power, double usage, double mhz) {
+//   fahrenheit: 単位フラグ (b[5]) を立て、温度は ceil(℃) × 1.8 + 32 を送る
+static void make_sensor_data(BYTE b[13], double temp, double power, double usage, double mhz, BOOL fahrenheit) {
     int t = iclamp(iceil(temp), 0, 150);
     int pw = iclamp(iceil(power), 0, 255);
-    int pw2 = iclamp((int)(pw * 0.94 + 0.5), 0, 255);
+    int pw2 = pw * 9529 / 10000;  // floor(PW × 0.9529)。記録した全 24 組に一致 (係数 0.9524〜0.9534 なら同じ)
     int us = iclamp(iceil(usage), 0, 100);
     int mz = iclamp(iceil(mhz), 0, 65535);
-    float ft = (float)t;
-    DWORD bits;
-    memcpy(&bits, &ft, 4);
+    DWORD bits = float_bits_trunc(fahrenheit ? 32.0 + 1.8 * (double)t : (double)t);
     b[0] = 0x01; b[1] = 0x02; b[2] = 0x00;
-    b[3] = (BYTE)pw; b[4] = (BYTE)pw2; b[5] = 0x00;
+    b[3] = (BYTE)pw; b[4] = (BYTE)pw2; b[5] = fahrenheit ? 0x01 : 0x00;
     b[6] = (BYTE)(bits >> 24); b[7] = (BYTE)(bits >> 16); b[8] = (BYTE)(bits >> 8); b[9] = (BYTE)bits;
     b[10] = (BYTE)us;
     b[11] = (BYTE)(mz >> 8); b[12] = (BYTE)mz;
 }
+
+// 画面オフ時に MasterCraft が毎秒送る固定データ (フレーム A は送らない)
+static const BYTE SCREEN_OFF_DATA[13] = {0x01, 0x00, 0x00, 0x64, 0x32, 0x00, 0x42, 0x70, 0x00, 0x00, 0x28, 0x0E, 0x10};
 
 // HID 出力レポートを組み立てる: [10] 68 01 09 <len> <data> <sum(68..data)> 16, len まで 0 埋め
 static BOOL make_report(BYTE *buf, int len, const BYTE *data, int n) {
@@ -178,7 +196,7 @@ static BOOL g_outIsConsole;
 
 static void out_w(const WCHAR *s) {
     DWORD n = (DWORD)lstrlenW(s), wr;
-    char buf[1024];
+    char buf[2048];
     int len;
     if (g_out == INVALID_HANDLE_VALUE || g_out == NULL) return;
     if (g_outIsConsole) {
@@ -534,6 +552,38 @@ static BOOL send_frame(const BYTE *data, int n) {
 }
 
 // ---------------------------------------------------------------------------
+// 設定 (HKLM\SOFTWARE\SK700LCD)
+// SK700V 本体は設定を保存しない。MasterCraft も毎秒のフレームに含めて送っているだけ。
+// ---------------------------------------------------------------------------
+#define CFG_KEY L"SOFTWARE\\SK700LCD"
+#define SVC_CONTROL_RELOAD 128  // ユーザー定義のサービス制御コード: 設定の再読み込み
+
+typedef struct { DWORD alert, screen, fahrenheit; } CONFIG;
+static CONFIG g_cfg = {1, 1, 0};  // 既定: 温度警告オン・画面オン・℃ (MasterCraft の初期値と同じ)
+static volatile LONG g_reload;
+
+static const struct { const WCHAR *arg, *value; } CFG_ITEMS[3] = {
+    {L"alert", L"TemperatureAlert"}, {L"screen", L"ScreenOn"}, {L"unit", L"Fahrenheit"}};
+
+static DWORD reg_get(HKEY k, const WCHAR *name, DWORD def) {
+    DWORD v, sz = sizeof v, type;
+    if (RegQueryValueExW(k, name, NULL, &type, (BYTE *)&v, &sz) == ERROR_SUCCESS && type == REG_DWORD) return v ? 1 : 0;
+    return def;
+}
+
+static void config_load(void) {
+    HKEY k;
+    CONFIG c = {1, 1, 0};
+    if (RegOpenKeyExW(HKEY_LOCAL_MACHINE, CFG_KEY, 0, KEY_READ | KEY_WOW64_64KEY, &k) == ERROR_SUCCESS) {
+        c.alert = reg_get(k, CFG_ITEMS[0].value, 1);
+        c.screen = reg_get(k, CFG_ITEMS[1].value, 1);
+        c.fahrenheit = reg_get(k, CFG_ITEMS[2].value, 0);
+        RegCloseKey(k);
+    }
+    g_cfg = c;
+}
+
+// ---------------------------------------------------------------------------
 // メインループ
 // ---------------------------------------------------------------------------
 static HANDLE g_stop;
@@ -546,6 +596,7 @@ static void tick(int n) {
     double usage = read_usage(), v;
     BOOL lcdOk = FALSE;
 
+    if (InterlockedExchange(&g_reload, 0)) config_load();
     if (g_pio == INVALID_HANDLE_VALUE) {
         if (pioRetry-- <= 0) { pioRetry = 10; pio_init(); }
     }
@@ -561,14 +612,20 @@ static void tick(int n) {
         hid_open();
     }
 
-    if (g_temp >= 0 && g_hid != INVALID_HANDLE_VALUE) {
-        BYTE a[2] = {0x03, 0x01};
-        BYTE b[13];
-        make_sensor_data(b, g_temp, g_power, usage, g_mhz);
-        lcdOk = send_frame(a, 2);
-        if (lcdOk) {
-            WaitForSingleObject(g_stop, 16);
-            lcdOk = send_frame(b, 13);
+    if (g_hid != INVALID_HANDLE_VALUE && (!g_cfg.screen || g_temp >= 0)) {
+        if (g_cfg.screen) {
+            BYTE a[2];
+            BYTE b[13];
+            a[0] = 0x03;
+            a[1] = (BYTE)g_cfg.alert;  // フレーム A = 温度警告 (03 01 オン / 03 00 オフ)
+            make_sensor_data(b, g_temp, g_power, usage, g_mhz, g_cfg.fahrenheit);
+            lcdOk = send_frame(a, 2);
+            if (lcdOk) {
+                WaitForSingleObject(g_stop, 16);
+                lcdOk = send_frame(b, 13);
+            }
+        } else {
+            lcdOk = send_frame(SCREEN_OFF_DATA, 13);
         }
         if (!lcdOk) { hid_close(); hidRetry = 1; }
     }
@@ -583,6 +640,7 @@ static void tick(int n) {
         sb_i(&s, iceil(g_mhz)); sb_s(&s, L"MHz  LCD:");
         sb_s(&s, lcdOk ? L"OK" : (g_hid == INVALID_HANDLE_VALUE ? L"未接続" : (g_temp < 0 ? L"温度待ち" : L"送信失敗")));
         if (g_pio == INVALID_HANDLE_VALUE) sb_s(&s, L"  (PawnIO 未接続)");
+        if (!g_cfg.screen) sb_s(&s, L"  [画面オフ]");
         sb_s(&s, L"\r\n");
         out_w(s.b);
     }
@@ -639,6 +697,9 @@ static DWORD WINAPI svc_ctrl(DWORD ctrl, DWORD type, LPVOID data, LPVOID ctx) {
         return NO_ERROR;
     case SERVICE_CONTROL_INTERROGATE:
         return NO_ERROR;
+    case SVC_CONTROL_RELOAD:
+        InterlockedExchange(&g_reload, 1);
+        return NO_ERROR;
     }
     return ERROR_CALL_NOT_IMPLEMENTED;
 }
@@ -649,6 +710,7 @@ static void WINAPI svc_main(DWORD argc, LPWSTR *argv) {
     if (!g_ssh) return;
     svc_set(SERVICE_START_PENDING, NO_ERROR);
     svc_set(SERVICE_RUNNING, NO_ERROR);
+    config_load();
     pio_init();
     trim_memory();
     run_loop(0);
@@ -783,6 +845,63 @@ static BOOL service_running(void) {
 }
 
 // ---------------------------------------------------------------------------
+// set / config
+// ---------------------------------------------------------------------------
+static void print_config(void) {
+    SB s;
+    config_load();
+    s.n = 0;
+    sb_s(&s, L"温度警告 (alert)  : "); sb_s(&s, g_cfg.alert ? L"on  (90℃超で赤い温度表示が点滅)" : L"off"); sb_s(&s, L"\r\n");
+    sb_s(&s, L"画面 (screen)     : "); sb_s(&s, g_cfg.screen ? L"on" : L"off"); sb_s(&s, L"\r\n");
+    sb_s(&s, L"単位 (unit)       : "); sb_s(&s, g_cfg.fahrenheit ? L"f (℉)" : L"c (℃)"); sb_s(&s, L"\r\n");
+    out_w(s.b);
+}
+
+// sk700lcd set <alert|screen|unit> <on|off|c|f>
+static int do_set(const WCHAR *item, const WCHAR *val) {
+    int i, idx = -1;
+    DWORD v;
+    HKEY k;
+    SC_HANDLE scm, svc;
+    SERVICE_STATUS st;
+    for (i = 0; i < 3; i++) if (!lstrcmpiW(item, CFG_ITEMS[i].arg)) idx = i;
+    if (idx == 2) {
+        if (!lstrcmpiW(val, L"f")) v = 1;
+        else if (!lstrcmpiW(val, L"c")) v = 0;
+        else idx = -1;
+    } else if (idx >= 0) {
+        if (!lstrcmpiW(val, L"on")) v = 1;
+        else if (!lstrcmpiW(val, L"off")) v = 0;
+        else idx = -1;
+    }
+    if (idx < 0) {
+        out_w(L"使い方: sk700lcd set alert on|off / set screen on|off / set unit c|f\r\n");
+        return 2;
+    }
+    {
+        LSTATUS st2 = RegCreateKeyExW(HKEY_LOCAL_MACHINE, CFG_KEY, 0, NULL, 0, KEY_SET_VALUE | KEY_WOW64_64KEY, NULL, &k, NULL);
+        if (st2 == ERROR_SUCCESS) {
+            st2 = RegSetValueExW(k, CFG_ITEMS[idx].value, 0, REG_DWORD, (const BYTE *)&v, sizeof v);
+            RegCloseKey(k);
+        }
+        if (st2 != ERROR_SUCCESS) {
+            SetLastError((DWORD)st2);  // Reg* はエラーを戻り値で返す
+            print_err(L"設定を保存できません (管理者として実行してください)");
+            return 1;
+        }
+    }
+    // 動作中のサービスに再読み込みさせる
+    scm = OpenSCManagerW(NULL, NULL, SC_MANAGER_CONNECT);
+    svc = scm ? OpenServiceW(scm, SVC_NAME, SERVICE_USER_DEFINED_CONTROL) : NULL;
+    if (svc && ControlService(svc, SVC_CONTROL_RELOAD, &st)) out_w(L"保存してサービスに反映しました\r\n");
+    else out_w(L"保存しました (サービスは動作していないので、次の起動時に反映されます)\r\n");
+    if (svc) CloseServiceHandle(svc);
+    if (scm) CloseServiceHandle(scm);
+    print_config();
+    return 0;
+}
+
+// ---------------------------------------------------------------------------
 // エントリポイント
 // ---------------------------------------------------------------------------
 static BOOL WINAPI console_ctrl(DWORD t) {
@@ -855,6 +974,13 @@ static int app_main(void) {
 
     if (!lstrcmpiW(cmd, L"install")) return do_install();
     if (!lstrcmpiW(cmd, L"uninstall")) return do_uninstall();
+    if (!lstrcmpiW(cmd, L"config")) { print_config(); return 0; }
+    if (!lstrcmpiW(cmd, L"set")) {
+        WCHAR item[16], val[16];
+        if (!get_arg(2, item, 16)) item[0] = 0;
+        if (!get_arg(3, val, 16)) val[0] = 0;
+        return do_set(item, val);
+    }
     if (!lstrcmpiW(cmd, L"run") || !lstrcmpiW(cmd, L"test")) {
         int secs = 0;
         if (!lstrcmpiW(cmd, L"test")) {
@@ -868,6 +994,7 @@ static int app_main(void) {
         if (!cpu_supported()) out_w(L"非対応の CPU です (AMD Ryzen / Intel Core 系のみ対応)\r\n");
         if (service_running()) out_w(L"注意: SK700LCD サービスが動作中です (二重送信になります)\r\n");
         SetConsoleCtrlHandler(console_ctrl, TRUE);
+        config_load();
         if (!pio_init()) print_err(L"PawnIO を開けません (管理者権限と PawnIO のインストールが必要)");
         print_cpu_info();
         run_loop(secs);
@@ -880,7 +1007,11 @@ static int app_main(void) {
     out_w(L"SK700V LCD - CPU 温度を液晶に送る常駐プログラム\r\n"
           L"  sk700lcd install    サービスとして登録・開始 (管理者)\r\n"
           L"  sk700lcd uninstall  サービスを停止・削除 (管理者)\r\n"
-          L"  sk700lcd run        コンソールで実行 (Ctrl+C で終了)\r\n");
+          L"  sk700lcd run        コンソールで実行 (Ctrl+C で終了)\r\n"
+          L"  sk700lcd config     液晶の設定を表示\r\n"
+          L"  sk700lcd set alert on|off   温度警告 (90℃超で赤い温度表示が点滅)\r\n"
+          L"  sk700lcd set screen on|off  画面表示\r\n"
+          L"  sk700lcd set unit c|f       温度の単位\r\n");
     return 0;
 }
 

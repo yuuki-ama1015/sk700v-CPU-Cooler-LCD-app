@@ -9,6 +9,8 @@
 - レジスタ解読・フレーム生成は純粋関数にし、`tools/test_decode.c` で単体テストする（Intel 経路は AMD 機で実行できないため）
 - 液晶へは HID 出力レポートを 1 秒ごとに 2 フレーム（プロトコルは README 参照）。失敗時は自動で再接続
 - 値の丸めは MasterCraft と同じく切り上げ
+- 液晶の設定（温度警告・画面オン/オフ・℃/℉）は sk700lcd 側で持つ（本体は保存しない）。HKLM\SOFTWARE\SK700LCD に DWORD で保存し、`set` 実行時にサービス制御コード 128 を送って再読み込みさせる
+- MasterCraft の解析は `tools/analysis/mc_inspect.js` に集約（インスペクタ経由。ipcMain ハンドラを直接呼べば UI 操作なしで再現できる）
 - 昇格して実行する PowerShell スクリプトは ASCII のみで書く（PS 5.1 が BOM なし UTF-8 を CP932 で読み、日本語コメントが次の行を飲み込むため）
 - AI の開発ルールは AGENTS.md に置く（CLAUDE.md は `@AGENTS.md` のみ）。共通ルールの範囲は開発 PC の ~/.codex/AGENTS.md が正本で、ここへ同期する
 
@@ -25,6 +27,15 @@
 - 2026-11-09 GitHub リポジトリ（yuuki-ama1015/sk700v-CPU-Cooler-LCD-app）に初回コミット
 - 2026-11-09 Intel 対応版をこの PC（Ryzen 7 5800X）に再インストール。15 秒テストで 15/15 送信成功、1 回目から消費電力が出ること（0W なし）を確認。サービス稼働中（WS 1.1MB）
 - 2026-11-09 AGENTS.md（複数 AI・クラウド環境共通の開発ルール）と CLAUDE.md を追加
+- 2026-11-09 MasterCraft の SK700V 設定画面を解析。SK700V で変えられる設定は 3 つだけ: 画面表示オン/オフ（options.screenStatus）、温度警告オン/オフ（mode.value。オンで 90℃超のとき赤い温度表示が点滅）、℃/℉（アプリ全体の temperatureDisplay）。明るさ・回転・シチュエーションモード等は他機種と共用のストア項目で SK700V の画面には出てこない
+- 2026-11-09 解析ツールを整理: `tools/analysis/mc_inspect.js`（インスペクタ起動・HID フック・ipcMain ハンドラ直接呼び出しの共通処理）、`settings_probe.js`（設定を 1 項目ずつ変えて HID 送信を記録し、最後に元へ戻す）。hid_sniff.js も共通処理を使う形に変更
+- 2026-11-09 settings_probe で 3 設定を切り替え（いずれも code 0 で成功、元に戻したことも確認）。ただし設定変更の瞬間には HID 送信が一切ない。設定は毎秒の定期送信（フレーム A/B）に反映される作りで、定期送信はセンサー値が届かないと始まらない（Helper Service 無効のため 1 回目は送信ゼロ）
+- 2026-11-09 Helper Service を一時起動（SK700LCD は一時停止、終了後に両方とも自動で元に戻した）して settings_probe を実行し、3 設定のプロトコルを特定: 温度警告 = フレーム A の 2 バイト目（03 01 / 03 00）、℉ = フレーム B の 6 バイト目 01 ＋ 温度に ceil(℃)×1.8+32（float 変換は仮数部切り捨て）、画面オフ = フレーム A を送らずフレーム B を固定値 01 00 00 64 32 00 42 70 00 00 28 0E 10 にする。設定は本体に保存されず、PC 側が毎秒送っているだけと判明
+- 2026-11-09 PW2 の式を修正: round(PW×0.94) は 22W→20 などで外れていた。記録した全 24 組に一致するのは floor(PW × 0.9524〜0.9534) だけなので floor(PW×0.9529) に変更
+- 2026-11-09 `sk700lcd set alert|screen|unit` と `sk700lcd config` を実装。設定は HKLM\SOFTWARE\SK700LCD に保存し、サービス制御コード 128 で動作中のサービスに即反映。単体テスト 53 件すべて成功（MasterCraft が実際に送ったフレームとバイト単位で一致）
+- 2026-11-09 設定対応版をこの PC に再インストール（入れたファイルがビルドと同一であることを確認）。`set screen off`→`on`、`set alert off`→`on` を実行し、いずれもサービスへの再読み込み通知が成功。最終設定は 温度警告オン・画面オン・℃。サービス WS 1.16MB。℉ はユーザーが不要とのことで試していない
+- 2026-11-09 ユーザーが目視確認: `set screen off` で液晶が消え、`set screen on` で戻った。MasterCraft なしで設定まで完結することを実機で確認
+- 2026-11-09 README を更新: 設定コマンド、プロトコル（温度警告・℉・画面オフ・PW2）、「MasterCraft は不要」。以前の「設定はクーラー本体に保存される」は誤りだったので訂正
 - 2026-11-09 README に「必要なもの」を追加: PawnIO 必須（winget `namazso.PawnIO` / pawnio.eu、`sc query PawnIO` で確認）、HWiNFO・MasterCraft・ランタイム不要、MasterCraft アンインストール時の注意。PawnIO は同梱しない方針を明記
 
 ## 次にやること
@@ -33,19 +44,15 @@
 3. 再起動・スリープ復帰・USB 抜き差し後も表示が続くか確認
 4. 本体コードのライセンスを決める（リポジトリは公開）
 5. `install` 実行時に PawnIO の有無を確認し、未導入なら導入方法を表示する（今は未導入でもサービス登録できてしまい、液晶に何も出ない）
-6. MasterCraft なしで完結させる（液晶の設定も sk700lcd でできるようにする）
-   1. **MasterCraft をアンインストールする前に**、設定変更時の HID 送信を `tools/analysis/hid_sniff.js` で記録する。対象は MasterCraft の設定画面の全項目: 表示モード（mode: 1=CPU / 2=GPU / 3=PSU）、明るさ（screenBrightness）、画面の向き（screenRotate）、画面オン/オフ（screenStatus）、ジャイロ（gyroStatus）、無負荷時画面（noLoadScreen）、RGB（rgbOptical）、表示項目（recorderMode: cpuClock / cpuTemperature）、シチュエーションモード（mainAreaMode / auxiliaryAreaMode / styleType / spectrumType）、モーションモード（画像/GIF）
-   2. 項目ごとに値を 1 つずつ変えてフレームの差分からコマンドを特定し、README のプロトコル節に追記する。デバイスからの応答（入力レポート）も記録する
-   3. `sk700lcd.exe set <項目> <値>` などのコマンドで設定を書き込めるようにする（画像/GIF の転送は優先度低）
-   4. 新しい PC でも MasterCraft を一度も使わずに使い始められるよう、初期設定の手順を README に書く
-   5. 上記が済んだら MasterCraft をアンインストールし、README の「MasterCraft をアンインストールする場合の注意」を更新する
+6. MasterCraft をアンインストール（インストーラーは Downloads に残す）。自作版だけで完結することは確認済み
 
 ## 未解決の問題・メモ
 - Intel 経路は実機未確認（IntelMSR モジュールは Intel 以外では読み込みを拒否するため AMD 機では試せない）
 - Intel のパッケージ温度は LHM / Linux coretemp と同じく bit31（Reading Valid）を確認している。立たない CPU があればコア温度にフォールバックする
 - PawnIO は同梱しない（カーネルドライバは要インストールで、同梱しても手間が減るだけ。公式配布なら更新され、他ソフトとの版の食い違いも起きない）
 - 64 論理プロセッサを超える CPU（プロセッサグループ 2 以上）はグループ 0 のコアしか見ていない
-- PW2（PW × 0.94）の意味は不明。数値の対応のみ確認済み
-- フレーム A（03 01）の意味は不明（MasterCraft が毎秒送る固定値をそのまま送っている）
+- PW2 の意味は不明（floor(PW × 0.9529) ≒ PW ÷ 1.05 で記録 24 組すべてに一致、という数値の対応のみ）
+- 画面オフ時のフレーム B の固定値（100W / 50W / 60.0 / 40% / 3600MHz）の意味は不明。MasterCraft と同じものをそのまま送っている
+- 2026-11-09 18:12 にユーザーが MasterCraft を手動起動しており、SK700LCD と同時に動いていた（センサー値が届かないので送信はしていなかったとみられる）。解析のため Claude が終了させた
 - 華氏表示（MasterCraft の temperatureDisplay）は未対応
 - MasterCraft を手動で起動すると二重送信になる
