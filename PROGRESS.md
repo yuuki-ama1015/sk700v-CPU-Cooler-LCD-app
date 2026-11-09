@@ -37,14 +37,17 @@
 - 2026-11-09 ユーザーが目視確認: `set screen off` で液晶が消え、`set screen on` で戻った。MasterCraft なしで設定まで完結することを実機で確認
 - 2026-11-09 README を更新: 設定コマンド、プロトコル（温度警告・℉・画面オフ・PW2）、「MasterCraft は不要」。以前の「設定はクーラー本体に保存される」は誤りだったので訂正
 - 2026-11-09 README に「必要なもの」を追加: PawnIO 必須（winget `namazso.PawnIO` / pawnio.eu、`sc query PawnIO` で確認）、HWiNFO・MasterCraft・ランタイム不要、MasterCraft アンインストール時の注意。PawnIO は同梱しない方針を明記
+- 2026-11-09 この PC から MasterCraft をアンインストール（公式アンインストーラーを `/allusers /S` で実行。Helper Service・ショートカット・%APPDATA%\MasterCraft はアンインストーラーが削除）。残っていた C:\MasterCraft の空フォルダと %LOCALAPPDATA%\mastercraft-updater（340MB）はごみ箱へ移動。インストーラー（Downloads\MasterCraft-1.0.5-setup.exe）は残した。SK700LCD・PawnIO は稼働中
+- 2026-11-09 README の「MasterCraft に戻す」を削除し「アンインストール」節に置き換え（MasterCraft の入れ直しは公式インストーラーを実行するだけなので手順書は不要、とのユーザー判断）
+- 2026-11-09 `uninstall` が設定レジストリ（HKLM\SOFTWARE\SK700LCD）も削除するように修正。PawnIO は他ソフトと共用なので残す旨を表示。この PC にインストール済みの exe はまだ修正前（設定キーは消さない）。リポジトリの build から `uninstall` を実行すれば消える
 
 ## 次にやること
-1. 液晶に温度が表示されているかユーザーが目視確認
-2. Intel 実機で `sk700lcd.exe test 20 log.txt` を実行し、温度・電力・クロックが HWiNFO と一致するか確認
-3. 再起動・スリープ復帰・USB 抜き差し後も表示が続くか確認
-4. 本体コードのライセンスを決める（リポジトリは公開）
-5. `install` 実行時に PawnIO の有無を確認し、未導入なら導入方法を表示する（今は未導入でもサービス登録できてしまい、液晶に何も出ない）
-6. MasterCraft をアンインストール（インストーラーは Downloads に残す）。自作版だけで完結することは確認済み
+1. Intel 実機で `sk700lcd.exe test 20 log.txt` を実行し、温度・電力・クロックが HWiNFO と一致するか確認
+2. 再起動・スリープ復帰・USB 抜き差し後も表示が続くか確認（MasterCraft なしの状態で）
+3. 本体コードのライセンスを決める（リポジトリは公開）
+4. `install` 実行時に PawnIO の有無を確認し、未導入なら導入方法を表示する（今は未導入でもサービス登録できてしまい、液晶に何も出ない）
+5. 配布用 zip（exe ＋ install.bat / uninstall.bat）を GitHub Releases で配布するか検討（ユーザー未決定）
+6. ℉ 機能は不要とのこと。残すか削るかユーザーに確認（現状は実装済み・未使用）
 
 ## 未解決の問題・メモ
 - Intel 経路は実機未確認（IntelMSR モジュールは Intel 以外では読み込みを拒否するため AMD 機では試せない）

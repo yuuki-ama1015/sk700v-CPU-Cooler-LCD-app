@@ -827,6 +827,9 @@ static int do_uninstall(void) {
         if (!DeleteFileW(exe) && GetLastError() != ERROR_FILE_NOT_FOUND) MoveFileExW(exe, NULL, MOVEFILE_DELAY_UNTIL_REBOOT);
         RemoveDirectoryW(dir);
     }
+    // set コマンドで保存した設定も消す
+    if (RegDeleteKeyExW(HKEY_LOCAL_MACHINE, CFG_KEY, KEY_WOW64_64KEY, 0) == ERROR_SUCCESS) out_w(L"設定 (HKLM\\" CFG_KEY L") を削除しました\r\n");
+    out_w(L"PawnIO は他のソフトも使うので残しています。不要ならアプリ一覧からアンインストールしてください\r\n");
     return 0;
 }
 

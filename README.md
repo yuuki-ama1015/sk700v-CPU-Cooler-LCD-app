@@ -90,16 +90,16 @@ MasterCraft と同時に動かすと液晶への送信が二重になるので�
 | CPU | 常時数 % 変動 | 平均 0.000 %（10 秒計測） |
 | サイズ | 本体 162 MB | 36 KB |
 
-## MasterCraft に戻す
+## アンインストール
 
-管理者の PowerShell で:
+管理者として実行:
 
-```powershell
-& "C:\Program Files\SK700LCD\sk700lcd.exe" uninstall
-Set-Service -Name 'MasterCraft Helper Service' -StartupType Automatic
-Start-Service -Name 'MasterCraft Helper Service'
-Set-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -Name MasterCraft -Value 'C:\MasterCraft\MasterCraft.exe -autoRun'
+```bat
+sk700lcd.exe uninstall
 ```
+
+サービス `SK700LCD`、`C:\Program Files\SK700LCD\`、設定（`HKLM\SOFTWARE\SK700LCD`）を削除する。どこにある sk700lcd.exe から実行してもよい。
+PawnIO は他のソフトも使うので残す。不要ならアプリ一覧から別途アンインストールする。
 
 ## ビルドとテスト
 
