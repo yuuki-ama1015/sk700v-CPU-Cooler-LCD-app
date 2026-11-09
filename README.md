@@ -116,7 +116,12 @@ Visual Studio 2022 Build Tools（MSVC）が必要。
 ```bat
 build.bat              :: build\sk700lcd.exe を作る
 tools\run_tests.bat    :: レジスタ解読とフレーム生成の単体テスト
+powershell -ExecutionPolicy Bypass -File tools\make_release.ps1   :: ビルド・テスト後に配布 zip を作る
 ```
+
+配布 zip（`build\sk700lcd-<版>.zip`）の中身: `sk700lcd.exe`、`install.bat`、`uninstall.bat`、`README.txt`、`LICENSE-PawnIO.Modules.txt`（元ファイルは `dist\`）。
+`install.bat` は管理者に昇格し、PawnIO が無ければ winget で入れてから `sk700lcd.exe install` を実行する。MasterCraft が動いている・入っている場合は注意を表示する。
+`uninstall.bat` は `sk700lcd.exe uninstall` を実行する。
 
 単体テストは、Intel のレジスタ解読（TjMax・温度・倍率・電力単位）と、MasterCraft が実際に送っていたフレームとの一致を確認する。
 IntelMSR モジュールは Intel CPU 以外では読み込みを拒否するので、Intel 経路の実機確認は Intel 機で `sk700lcd.exe test 20 log.txt` を実行して行う。

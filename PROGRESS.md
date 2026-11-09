@@ -43,14 +43,16 @@
 - 2026-11-09 ℉ 機能を削除（ユーザーが不要と判断）。`set unit` と関連コード・テストを削除し、温度は常に ℃。README のプロトコル説明には解析結果として ℉ の形式を残した
 - 2026-11-09 uninstall を改善: インストール先の exe 自身から実行しても、終了後に cmd.exe が exe とフォルダを削除する（念のため再起動時の削除も予約）。設定キー削除と PawnIO を残す旨の案内も表示。実行中の exe のコピーで、実行中は消えず終了後に exe とフォルダが消えることを確認。README に「残すもの」と削除のされ方の表を追加
 - 2026-11-09 単体テスト 49 件すべて成功（℉ のテストを削除し、記録した実フレームを 1 件追加）
+- 2026-11-10 配布 zip を作成: `dist\`（install.bat / uninstall.bat / README.txt）と `tools\make_release.ps1`（ビルド・テスト後に `build\sk700lcd-<版>.zip` を作る。bat は CRLF に変換）。install.bat は自己昇格し、PawnIO が無ければ winget（namazso.PawnIO）で導入、MasterCraft が動いている/入っていれば注意を表示してから `sk700lcd.exe install`
+- 2026-11-10 sk700lcd-0.1.0.zip（26KB）を展開して install.bat を管理者で実行し、この PC のサービスを最新版に入れ替え（PawnIO 検出 OK、インストール先の exe が zip と同一、サービス稼働、WS 628KB）
 
 ## 次にやること
-1. Intel 実機で `sk700lcd.exe test 20 log.txt` を実行し、温度・電力・クロックが HWiNFO と一致するか確認
-2. 再起動・スリープ復帰・USB 抜き差し後も表示が続くか確認（MasterCraft なしの状態で）
-3. 本体コードのライセンスを決める（リポジトリは公開）
-4. `install` 実行時に PawnIO の有無を確認し、未導入なら導入方法を表示する（今は未導入でもサービス登録できてしまい、液晶に何も出ない）
-5. 配布用 zip（exe ＋ install.bat / uninstall.bat）を GitHub Releases で配布するか検討（ユーザー未決定）
-6. この PC のサービスを最新ビルドに入れ替える（今入っているのは ℉ 削除・uninstall 改善の前の版）
+1. GitHub Releases で v0.1.0 として zip を公開するか決める（ユーザー確認待ち）
+2. Intel 実機で `sk700lcd.exe test 20 log.txt` を実行し、温度・電力・クロックが HWiNFO と一致するか確認
+3. 再起動・スリープ復帰・USB 抜き差し後も表示が続くか確認（MasterCraft なしの状態で）
+4. 本体コードのライセンスを決める（リポジトリは公開。配布前に決めたい）
+5. PawnIO の無い PC で install.bat の winget 自動導入を確認（この PC では PawnIO 導入済みのため未確認）
+6. uninstall.bat（インストール先 exe の自己削除を含む）を実際に実行して確認（未実施）
 
 ## 未解決の問題・メモ
 - Intel 経路は実機未確認（IntelMSR モジュールは Intel 以外では読み込みを拒否するため AMD 機では試せない）
