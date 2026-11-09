@@ -3,7 +3,7 @@
 Sudokoo SK700V（CPUクーラー）の液晶に CPU 温度を送るだけの軽量常駐プログラム。
 純正アプリ MasterCraft（Electron＋HWiNFO センサーサービス、常駐 約550MB）の代替。
 
-- C 言語 / CRT なし / Win32 API のみ。exe 約 36KB
+- C 言語 / CRT なし / Win32 API のみ。exe 約 37KB
 - Windows サービスとして動作（ログオン前から表示、ウィンドウなし、UAC なし）
 - **[PawnIO](https://pawnio.eu/) ドライバが必須**（下記「必要なもの」）
 - 対応 CPU
@@ -49,7 +49,7 @@ sc query PawnIO
 ### MasterCraft は不要
 
 SK700V で変えられる設定は「画面表示オン/オフ」「温度警告」「℃/℉」の 3 つだけで、どれもクーラー本体には保存されない（PC 側が毎秒のデータに含めて送っている）。
-3 つとも sk700lcd の `set` コマンドで変えられるので、MasterCraft はアンインストールしてよい。
+画面表示と温度警告は sk700lcd の `set` コマンドで変えられるので、MasterCraft はアンインストールしてよい（℉ 表示は不要と判断して実装していない。常に ℃）。
 
 ## 使い方
 
@@ -68,11 +68,10 @@ build\sk700lcd.exe test 20 log.txt  :: 20 秒実行してログをファイル�
 sk700lcd config                 :: 今の設定を表示
 sk700lcd set alert on|off       :: 温度警告（オンで 90℃超のとき赤い温度表示が点滅）
 sk700lcd set screen on|off      :: 画面表示
-sk700lcd set unit c|f           :: 温度の単位（℃ / ℉）
 ```
 
-既定値は 温度警告オン・画面オン・℃（MasterCraft の初期値と同じ）。
-設定は `HKLM\SOFTWARE\SK700LCD`（DWORD: `TemperatureAlert` / `ScreenOn` / `Fahrenheit`）に保存され、動作中のサービスにはすぐ反映される（サービス制御コード 128 で再読み込み）。変更には管理者権限が必要。
+既定値は 温度警告オン・画面オン（MasterCraft の初期値と同じ）。
+設定は `HKLM\SOFTWARE\SK700LCD`（DWORD: `TemperatureAlert` / `ScreenOn`）に保存され、動作中のサービスにはすぐ反映される（サービス制御コード 128 で再読み込み）。変更には管理者権限が必要。
 
 `run` / `test` の最初の行に CPU の識別結果（ベンダー・family・model・ベースクロック、Intel なら TjMax と温度の取得方法）が出ます。
 
@@ -88,7 +87,7 @@ MasterCraft と同時に動かすと液晶への送信が二重になるので�
 | プロセス | UI 5 + センサーサービス 2 | 1（サービス） |
 | メモリ | 約 545 MB | ワーキングセット 1.1 MB / プライベート 0.45 MB |
 | CPU | 常時数 % 変動 | 平均 0.000 %（10 秒計測） |
-| サイズ | 本体 162 MB | 36 KB |
+| サイズ | 本体 162 MB | 37 KB |
 
 ## アンインストール
 
@@ -98,8 +97,17 @@ MasterCraft と同時に動かすと液晶への送信が二重になるので�
 sk700lcd.exe uninstall
 ```
 
-サービス `SK700LCD`、`C:\Program Files\SK700LCD\`、設定（`HKLM\SOFTWARE\SK700LCD`）を削除する。どこにある sk700lcd.exe から実行してもよい。
-PawnIO は他のソフトも使うので残す。不要ならアプリ一覧から別途アンインストールする。
+sk700lcd が PC に残すものは次の 3 つだけで、`uninstall` ですべて消える。どこにある sk700lcd.exe から実行してもよい。
+
+| 残すもの | 削除のされ方 |
+|---|---|
+| サービス `SK700LCD`（失敗時の再起動設定を含む） | 停止してから削除 |
+| `C:\Program Files\SK700LCD\sk700lcd.exe` とフォルダ | 削除。インストール先の exe 自身から実行した場合は、終了から数秒後に削除される |
+| 設定 `HKLM\SOFTWARE\SK700LCD` | 削除 |
+
+AppData・一時ファイル・タスク・自動起動（Run キー）などは作らない。
+
+PawnIO は他のソフト（LibreHardwareMonitor、FanControl など）も使うので残す。ほかに使うソフトがなければ、`winget uninstall namazso.PawnIO` かアプリ一覧から別途アンインストールする。
 
 ## ビルドとテスト
 
@@ -126,9 +134,9 @@ A: data = 03 AL                                AL = 温度警告 01 オン / 00 
 B: data = 01 02 00 PW PW2 UN TT TT TT TT US MH ML
    PW   = CPU 消費電力 [W]               ceil
    PW2  = floor(PW × 0.9529)             （係数 0.9524〜0.9534 なら記録した 24 組すべてに一致。≒ PW ÷ 1.05）
-   UN   = 単位 00 ℃ / 01 ℉
+   UN   = 単位 00 ℃ / 01 ℉                （sk700lcd は ℃ 固定）
    TT   = 温度の float32 ビッグエンディアン。℃ は ceil(Tc)、℉ は ceil(Tc) × 1.8 + 32
-          （float への変換は仮数部の切り捨て。例: 114.8 → 42 E5 99 99）
+          （MasterCraft の float 変換は仮数部の切り捨て。例: 114.8 → 42 E5 99 99）
    US   = CPU 使用率 [%]                ceil
    MH ML= CPU クロック [MHz] uint16 BE   ceil（全コア中の最大）
 

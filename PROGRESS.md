@@ -9,7 +9,7 @@
 - レジスタ解読・フレーム生成は純粋関数にし、`tools/test_decode.c` で単体テストする（Intel 経路は AMD 機で実行できないため）
 - 液晶へは HID 出力レポートを 1 秒ごとに 2 フレーム（プロトコルは README 参照）。失敗時は自動で再接続
 - 値の丸めは MasterCraft と同じく切り上げ
-- 液晶の設定（温度警告・画面オン/オフ・℃/℉）は sk700lcd 側で持つ（本体は保存しない）。HKLM\SOFTWARE\SK700LCD に DWORD で保存し、`set` 実行時にサービス制御コード 128 を送って再読み込みさせる
+- 液晶の設定（温度警告・画面オン/オフ）は sk700lcd 側で持つ（本体は保存しない）。HKLM\SOFTWARE\SK700LCD に DWORD で保存し、`set` 実行時にサービス制御コード 128 を送って再読み込みさせる。温度は ℃ 固定（℉ はユーザーが不要と判断）
 - MasterCraft の解析は `tools/analysis/mc_inspect.js` に集約（インスペクタ経由。ipcMain ハンドラを直接呼べば UI 操作なしで再現できる）
 - 昇格して実行する PowerShell スクリプトは ASCII のみで書く（PS 5.1 が BOM なし UTF-8 を CP932 で読み、日本語コメントが次の行を飲み込むため）
 - AI の開発ルールは AGENTS.md に置く（CLAUDE.md は `@AGENTS.md` のみ）。共通ルールの範囲は開発 PC の ~/.codex/AGENTS.md が正本で、ここへ同期する
@@ -40,6 +40,9 @@
 - 2026-11-09 この PC から MasterCraft をアンインストール（公式アンインストーラーを `/allusers /S` で実行。Helper Service・ショートカット・%APPDATA%\MasterCraft はアンインストーラーが削除）。残っていた C:\MasterCraft の空フォルダと %LOCALAPPDATA%\mastercraft-updater（340MB）はごみ箱へ移動。インストーラー（Downloads\MasterCraft-1.0.5-setup.exe）は残した。SK700LCD・PawnIO は稼働中
 - 2026-11-09 README の「MasterCraft に戻す」を削除し「アンインストール」節に置き換え（MasterCraft の入れ直しは公式インストーラーを実行するだけなので手順書は不要、とのユーザー判断）
 - 2026-11-09 `uninstall` が設定レジストリ（HKLM\SOFTWARE\SK700LCD）も削除するように修正。PawnIO は他ソフトと共用なので残す旨を表示。この PC にインストール済みの exe はまだ修正前（設定キーは消さない）。リポジトリの build から `uninstall` を実行すれば消える
+- 2026-11-09 ℉ 機能を削除（ユーザーが不要と判断）。`set unit` と関連コード・テストを削除し、温度は常に ℃。README のプロトコル説明には解析結果として ℉ の形式を残した
+- 2026-11-09 uninstall を改善: インストール先の exe 自身から実行しても、終了後に cmd.exe が exe とフォルダを削除する（念のため再起動時の削除も予約）。設定キー削除と PawnIO を残す旨の案内も表示。実行中の exe のコピーで、実行中は消えず終了後に exe とフォルダが消えることを確認。README に「残すもの」と削除のされ方の表を追加
+- 2026-11-09 単体テスト 49 件すべて成功（℉ のテストを削除し、記録した実フレームを 1 件追加）
 
 ## 次にやること
 1. Intel 実機で `sk700lcd.exe test 20 log.txt` を実行し、温度・電力・クロックが HWiNFO と一致するか確認
@@ -47,7 +50,7 @@
 3. 本体コードのライセンスを決める（リポジトリは公開）
 4. `install` 実行時に PawnIO の有無を確認し、未導入なら導入方法を表示する（今は未導入でもサービス登録できてしまい、液晶に何も出ない）
 5. 配布用 zip（exe ＋ install.bat / uninstall.bat）を GitHub Releases で配布するか検討（ユーザー未決定）
-6. ℉ 機能は不要とのこと。残すか削るかユーザーに確認（現状は実装済み・未使用）
+6. この PC のサービスを最新ビルドに入れ替える（今入っているのは ℉ 削除・uninstall 改善の前の版）
 
 ## 未解決の問題・メモ
 - Intel 経路は実機未確認（IntelMSR モジュールは Intel 以外では読み込みを拒否するため AMD 機では試せない）
