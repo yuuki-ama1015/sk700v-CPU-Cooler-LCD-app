@@ -176,6 +176,8 @@ MasterCraft やファームウェアの更新でプロトコルが変わった�
 - `../probe_temp.c` … PawnIO で Tctl / CCD / 消費電力を 1 秒ごとに記録（要管理者、AMD）
 - `../hid_check.ps1` … 非管理者で HID の出力レポート長を確認し、固定フレームを 1 回送る
 
-## ライセンス表記
+## ライセンス
+
+本体（このリポジトリのソースコードと sk700lcd.exe）は [MIT License](LICENSE)。
 
 `res/AMDFamily17.bin` / `res/IntelMSR.bin` は [PawnIO.Modules](https://github.com/namazso/PawnIO.Modules)（LGPL-2.1）の署名済みモジュール（LibreHardwareMonitor 同梱版をそのままコピー）。全文は [res/LICENSE-PawnIO.Modules.txt](res/LICENSE-PawnIO.Modules.txt)。

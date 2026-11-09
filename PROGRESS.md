@@ -45,14 +45,14 @@
 - 2026-11-09 単体テスト 49 件すべて成功（℉ のテストを削除し、記録した実フレームを 1 件追加）
 - 2026-11-10 配布 zip を作成: `dist\`（install.bat / uninstall.bat / README.txt）と `tools\make_release.ps1`（ビルド・テスト後に `build\sk700lcd-<版>.zip` を作る。bat は CRLF に変換）。install.bat は自己昇格し、PawnIO が無ければ winget（namazso.PawnIO）で導入、MasterCraft が動いている/入っていれば注意を表示してから `sk700lcd.exe install`
 - 2026-11-10 sk700lcd-0.1.0.zip（26KB）を展開して install.bat を管理者で実行し、この PC のサービスを最新版に入れ替え（PawnIO 検出 OK、インストール先の exe が zip と同一、サービス稼働、WS 628KB）
+- 2026-11-10 GitHub Releases に v0.1.0 を公開（sk700lcd-0.1.0.zip、26KB、ダウンロードしてハッシュ一致を確認）
+- 2026-11-10 ライセンスを MIT に決定（ユーザーが一任）。LICENSE を追加（res/ の PawnIO モジュールは対象外で LGPL-2.1 と明記）、README と配布物の README.txt に記載、make_release.ps1 が LICENSE.txt を同梱。v0.1.0 の zip は公開済みの exe のまま LICENSE.txt と更新した README.txt を加えて差し替え（SHA256 1818EF0F62E980FFFD9E02A2817C299C5BD2D25A8BCAE821217908EE6369A39D、ダウンロードして一致を確認）、リリースノートも更新
 
 ## 次にやること
-1. GitHub Releases で v0.1.0 として zip を公開するか決める（ユーザー確認待ち）
-2. Intel 実機で `sk700lcd.exe test 20 log.txt` を実行し、温度・電力・クロックが HWiNFO と一致するか確認
-3. 再起動・スリープ復帰・USB 抜き差し後も表示が続くか確認（MasterCraft なしの状態で）
-4. 本体コードのライセンスを決める（リポジトリは公開。配布前に決めたい）
-5. PawnIO の無い PC で install.bat の winget 自動導入を確認（この PC では PawnIO 導入済みのため未確認）
-6. uninstall.bat（インストール先 exe の自己削除を含む）を実際に実行して確認（未実施）
+1. Intel 実機で `sk700lcd.exe test 20 log.txt` を実行し、温度・電力・クロックが HWiNFO と一致するか確認
+2. 再起動・スリープ復帰・USB 抜き差し後も表示が続くか確認（MasterCraft なしの状態で）
+3. PawnIO の無い PC で install.bat の winget 自動導入を確認（この PC では PawnIO 導入済みのため未確認）
+4. uninstall.bat（インストール先 exe の自己削除を含む）を実際に実行して確認（未実施）
 
 ## 未解決の問題・メモ
 - Intel 経路は実機未確認（IntelMSR モジュールは Intel 以外では読み込みを拒否するため AMD 機では試せない）

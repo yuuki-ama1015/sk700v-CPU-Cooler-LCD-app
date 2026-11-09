@@ -24,6 +24,7 @@ New-Item -ItemType Directory -Force $stage | Out-Null
 
 Copy-Item 'build\sk700lcd.exe' $stage
 Copy-Item 'res\LICENSE-PawnIO.Modules.txt' $stage
+Copy-Item 'LICENSE' (Join-Path $stage 'LICENSE.txt')
 # text files: force CRLF (cmd.exe can mis-handle labels in LF-only batch files)
 foreach ($f in 'install.bat', 'uninstall.bat', 'README.txt') {
   $t = [IO.File]::ReadAllText((Join-Path $root "dist\$f"))

@@ -28,4 +28,5 @@ https://github.com/yuuki-ama1015/sk700v-CPU-Cooler-LCD-app
 ■ 同梱物
   sk700lcd.exe                 本体（約 37KB）
   install.bat / uninstall.bat  インストール / アンインストール
+  LICENSE.txt                  本体のライセンス（MIT）
   LICENSE-PawnIO.Modules.txt   exe に埋め込んだ PawnIO モジュールのライセンス（LGPL-2.1）
