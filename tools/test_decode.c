@@ -1,0 +1,72 @@
+// Unit tests for the pure decode / frame functions in src/sk700lcd.c.
+// The Intel path cannot run on an AMD machine (the IntelMSR PawnIO module refuses to load),
+// so its register decoding is checked here against known register layouts.
+// Build & run: tools\run_tests.bat
+#define SK700_TEST
+#include "../src/sk700lcd.c"
+#include <stdio.h>
+#include <string.h>
+#include <math.h>
+
+static int g_fail, g_total;
+
+static void check_d(const char *name, double got, double want) {
+    g_total++;
+    if (fabs(got - want) > 1e-9) { g_fail++; printf("FAIL %s: got %.6f want %.6f\n", name, got, want); }
+}
+static void check_hex(const char *name, const BYTE *got, const char *wantHex, int n) {
+    char buf[600];
+    int i;
+    g_total++;
+    for (i = 0; i < n; i++) sprintf(buf + i * 2, "%02x", got[i]);
+    if (strcmp(buf, wantHex) != 0) { g_fail++; printf("FAIL %s:\n  got  %s\n  want %s\n", name, buf, wantHex); }
+}
+
+int main(void) {
+    BYTE d[13], rep[64];
+    BYTE a[2] = {0x03, 0x01};
+
+    // --- AMD Tctl (raw values captured on a Ryzen 7 5800X) ---
+    check_d("amd_tctl offset flag", amd_tctl(0x6a3b0000u), 57.125);
+    check_d("amd_tctl no flag", amd_tctl(0x38000000u), 56.0);
+    // --- AMD P-state ratio ---
+    check_d("amd_ratio zen3 P0 38x", amd_ratio(0x00000898u /*dfs=8 fid=0x98*/, 0x19), 38.0);
+    check_d("amd_ratio zen3 48.4x", amd_ratio(0x00000AF2u /*dfs=10 fid=0xF2*/, 0x19), 48.4);
+    check_d("amd_ratio zen5", amd_ratio(0x000003C0u /*fid=960 -> 4800MHz*/, 0x1A), 48.0);
+
+    // --- Intel TjMax (IA32_TEMPERATURE_TARGET[23:16]) ---
+    check_d("intel_tjmax 100", intel_tjmax(0x00640000u), 100.0);
+    check_d("intel_tjmax 95 with offset bits", intel_tjmax(0x055F0A00u), 95.0);
+    check_d("intel_tjmax 0 -> default", intel_tjmax(0), 100.0);
+    // --- Intel temperature: TjMax - readout[22:16], bit31 = valid ---
+    check_d("intel_temp valid", intel_temp(0x88430000u, 100.0), 33.0);
+    check_d("intel_temp valid 0 readout", intel_temp(0x80000000u, 95.0), 95.0);
+    check_d("intel_temp invalid", intel_temp(0x08430000u, 100.0), -1000.0);
+    // --- Intel ratio (IA32_PERF_STATUS) ---
+    check_d("intel_ratio alder lake 0x97", intel_ratio(0x00002D00u, 6, 0x97), 45.0);
+    check_d("intel_ratio raptor lake 0xB7 57x", intel_ratio(0x1C40003900ull, 6, 0xB7), 57.0);
+    check_d("intel_ratio nehalem 0x1E", intel_ratio(0x00000016u, 6, 0x1E), 22.0);
+    check_d("intel_ratio core2 half", intel_ratio(0x00004900u, 6, 0x17), 9.5);
+    // --- RAPL energy units ---
+    check_d("energy_unit intel 14", energy_unit(0x000A0E03u, CPU_INTEL, 6, 0x97), 1.0 / 16384.0);
+    check_d("energy_unit silvermont", energy_unit(0x00000505u, CPU_INTEL, 6, 0x37), 32.0e-6);
+    check_d("energy_unit amd 16", energy_unit(0x000A1003u, CPU_AMD, 0x19, 0x21), 1.0 / 65536.0);
+
+    // --- Frames must match what MasterCraft sent (captured with hid_sniff.js) ---
+    make_report(rep, 64, a, 2);
+    check_hex("frame A", rep, "106801090203017816", 9);
+    // CPU Power 32.37W -> 33, Temperature 54.xx -> 55, Usage 19.57% -> 20, Clock 4841.27 -> 4842
+    make_sensor_data(d, 54.25, 32.37, 19.57, 4841.27);
+    make_report(rep, 64, d, 13);
+    check_hex("frame B idle", rep, "106801090d010200211f00425c00001412ea7016", 20);
+    // under load: 67.03W -> 68, 63.13C -> 64, 100% , 4641.63 -> 4642
+    make_sensor_data(d, 63.13, 67.03, 100.0, 4641.63);
+    check_hex("data B load", d, "01020044400042800000641222", 13);
+    // padding up to the output report length
+    make_report(rep, 64, a, 2);
+    g_total++;
+    { int i, z = 1; for (i = 9; i < 64; i++) if (rep[i]) z = 0; if (!z) { g_fail++; printf("FAIL padding\n"); } }
+
+    printf("%d/%d passed\n", g_total - g_fail, g_total);
+    return g_fail ? 1 : 0;
+}

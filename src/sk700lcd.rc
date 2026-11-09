@@ -1,0 +1,33 @@
+#include <winres.h>
+
+#define IDR_PAWN_AMD17 101
+#define IDR_PAWN_INTEL 102
+
+// PawnIO modules (signed by their author; loaded into the PawnIO driver at runtime)
+IDR_PAWN_AMD17 RCDATA "..\\res\\AMDFamily17.bin"
+IDR_PAWN_INTEL RCDATA "..\\res\\IntelMSR.bin"
+
+1 RT_MANIFEST "sk700lcd.manifest"
+
+VS_VERSION_INFO VERSIONINFO
+ FILEVERSION 0,1,0,0
+ PRODUCTVERSION 0,1,0,0
+ FILEOS VOS_NT_WINDOWS32
+ FILETYPE VFT_APP
+BEGIN
+  BLOCK "StringFileInfo"
+  BEGIN
+    BLOCK "041104B0"
+    BEGIN
+      VALUE "FileDescription", "SK700V LCD CPU temperature feeder"
+      VALUE "FileVersion", "0.1.0"
+      VALUE "ProductName", "sk700lcd"
+      VALUE "ProductVersion", "0.1.0"
+      VALUE "OriginalFilename", "sk700lcd.exe"
+    END
+  END
+  BLOCK "VarFileInfo"
+  BEGIN
+    VALUE "Translation", 0x0411, 0x04B0
+  END
+END
