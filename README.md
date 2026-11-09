@@ -5,10 +5,52 @@ Sudokoo SK700V（CPUクーラー）の液晶に CPU 温度を送るだけの軽�
 
 - C 言語 / CRT なし / Win32 API のみ。exe 約 33KB
 - Windows サービスとして動作（ログオン前から表示、ウィンドウなし、UAC なし）
-- 依存: [PawnIO](https://pawnio.eu/) ドライバ（インストール済みであること）
+- **[PawnIO](https://pawnio.eu/) ドライバが必須**（下記「必要なもの」）
 - 対応 CPU
   - AMD Ryzen（Zen〜Zen5、family 17h/19h/1Ah）… Ryzen 7 5800X で動作確認済み
   - Intel Core（Nehalem 以降）… 実装済み・単体テスト済み、**実機未確認**
+
+## 必要なもの
+
+| | 必要か | 備考 |
+|---|---|---|
+| **PawnIO ドライバ** | **必須** | CPU 温度・消費電力・クロックを読むのに使う |
+| SK700V（USB 接続） | 必須 | Windows 標準の HID ドライバで認識される。専用ドライバ不要 |
+| HWiNFO | 不要 | センサーは PawnIO 経由で CPU から直接読む |
+| MasterCraft | 不要 | アンインストール可（下記の注意を参照） |
+| .NET / Visual C++ ランタイム | 不要 | Windows 標準の DLL（kernel32 / advapi32 / hid / cfgmgr32）のみ使用 |
+
+### PawnIO のインストール
+
+PawnIO は署名済みのカーネルドライバで、ハードウェアモニター系ソフトが共通で使う。
+LibreHardwareMonitor（0.9.5 以降）や FanControl などを入れたことがあれば、すでに入っている場合がある。
+
+どちらかの方法で入れる（管理者権限が必要）。
+
+```bat
+winget install namazso.PawnIO
+```
+
+または [pawnio.eu](https://pawnio.eu/) から `PawnIO_setup.exe` をダウンロードして実行。
+
+入っているかの確認:
+
+```bat
+sc query PawnIO
+```
+
+`TYPE : 1 KERNEL_DRIVER` と `STATE` が表示されれば導入済み。`FAILED 1060`（サービスが存在しない）なら未導入。
+
+- PawnIO がないとサービスは動くが温度が取れず、液晶には何も送られない。`sk700lcd.exe run` では「PawnIO を開けません」と表示される
+- sk700lcd を使っている間は PawnIO をアンインストールしないこと
+- PawnIO 本体はこのリポジトリに同梱していない。カーネルドライバは管理者権限で Windows にインストールする必要があり、同梱してもダウンロードの手間が省けるだけのため。公式の配布物を使えば更新も受けられ、同じ PawnIO を使う他のソフトと版が食い違うこともない
+- CPU ごとの読み取りモジュール（`res/*.bin`、数 KB）は exe に埋め込み済みなので、別途用意する必要はない
+
+### MasterCraft をアンインストールする場合の注意
+
+- 液晶の設定（表示モード・明るさ・画面の向き・表示項目）はクーラー本体に保存されているので、アンインストール後もそのまま表示される
+- ただし設定を変えるには MasterCraft が必要。変える可能性があるならインストーラーを残しておく
+- 一時的に MasterCraft を入れ直して設定を変えるときは、先にサービス `SK700LCD` を止める（二重送信になるため）
 
 ## 使い方
 
