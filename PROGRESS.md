@@ -47,6 +47,7 @@
 - 2026-11-10 sk700lcd-0.1.0.zip（26KB）を展開して install.bat を管理者で実行し、この PC のサービスを最新版に入れ替え（PawnIO 検出 OK、インストール先の exe が zip と同一、サービス稼働、WS 628KB）
 - 2026-11-10 GitHub Releases に v0.1.0 を公開（sk700lcd-0.1.0.zip、26KB、ダウンロードしてハッシュ一致を確認）
 - 2026-11-10 ライセンスを MIT に決定（ユーザーが一任）。LICENSE を追加（res/ の PawnIO モジュールは対象外で LGPL-2.1 と明記）、README と配布物の README.txt に記載、make_release.ps1 が LICENSE.txt を同梱。v0.1.0 の zip は公開済みの exe のまま LICENSE.txt と更新した README.txt を加えて差し替え（SHA256 1818EF0F62E980FFFD9E02A2817C299C5BD2D25A8BCAE821217908EE6369A39D、ダウンロードして一致を確認）、リリースノートも更新
+- 2026-11-10 GitHub がライセンスを「Other」と判定していたため、LICENSE を MIT の原文だけにした（res/ の PawnIO モジュールが LGPL-2.1 である注記は README の「ライセンス」節と res/LICENSE-PawnIO.Modules.txt に残る）。公開済み v0.1.0 の zip 内 LICENSE.txt は注記付きのままだが内容に矛盾はないので差し替えない
 
 ## 次にやること
 1. Intel 実機で `sk700lcd.exe test 20 log.txt` を実行し、温度・電力・クロックが HWiNFO と一致するか確認
