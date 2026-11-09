@@ -33,6 +33,12 @@
 3. 再起動・スリープ復帰・USB 抜き差し後も表示が続くか確認
 4. 本体コードのライセンスを決める（リポジトリは公開）
 5. `install` 実行時に PawnIO の有無を確認し、未導入なら導入方法を表示する（今は未導入でもサービス登録できてしまい、液晶に何も出ない）
+6. MasterCraft なしで完結させる（液晶の設定も sk700lcd でできるようにする）
+   1. **MasterCraft をアンインストールする前に**、設定変更時の HID 送信を `tools/analysis/hid_sniff.js` で記録する。対象は MasterCraft の設定画面の全項目: 表示モード（mode: 1=CPU / 2=GPU / 3=PSU）、明るさ（screenBrightness）、画面の向き（screenRotate）、画面オン/オフ（screenStatus）、ジャイロ（gyroStatus）、無負荷時画面（noLoadScreen）、RGB（rgbOptical）、表示項目（recorderMode: cpuClock / cpuTemperature）、シチュエーションモード（mainAreaMode / auxiliaryAreaMode / styleType / spectrumType）、モーションモード（画像/GIF）
+   2. 項目ごとに値を 1 つずつ変えてフレームの差分からコマンドを特定し、README のプロトコル節に追記する。デバイスからの応答（入力レポート）も記録する
+   3. `sk700lcd.exe set <項目> <値>` などのコマンドで設定を書き込めるようにする（画像/GIF の転送は優先度低）
+   4. 新しい PC でも MasterCraft を一度も使わずに使い始められるよう、初期設定の手順を README に書く
+   5. 上記が済んだら MasterCraft をアンインストールし、README の「MasterCraft をアンインストールする場合の注意」を更新する
 
 ## 未解決の問題・メモ
 - Intel 経路は実機未確認（IntelMSR モジュールは Intel 以外では読み込みを拒否するため AMD 機では試せない）
