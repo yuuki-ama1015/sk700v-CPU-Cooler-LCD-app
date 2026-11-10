@@ -48,12 +48,12 @@
 - 2026-11-10 GitHub Releases に v0.1.0 を公開（sk700lcd-0.1.0.zip、26KB、ダウンロードしてハッシュ一致を確認）
 - 2026-11-10 ライセンスを MIT に決定（ユーザーが一任）。LICENSE を追加（res/ の PawnIO モジュールは対象外で LGPL-2.1 と明記）、README と配布物の README.txt に記載、make_release.ps1 が LICENSE.txt を同梱。v0.1.0 の zip は公開済みの exe のまま LICENSE.txt と更新した README.txt を加えて差し替え（SHA256 1818EF0F62E980FFFD9E02A2817C299C5BD2D25A8BCAE821217908EE6369A39D、ダウンロードして一致を確認）、リリースノートも更新
 - 2026-11-10 GitHub がライセンスを「Other」と判定していたため、LICENSE を MIT の原文だけにした（res/ の PawnIO モジュールが LGPL-2.1 である注記は README の「ライセンス」節と res/LICENSE-PawnIO.Modules.txt に残る）。公開済み v0.1.0 の zip 内 LICENSE.txt は注記付きのままだが内容に矛盾はないので差し替えない
+- 2026-11-10 uninstall.bat を実機で確認: exe の無いフォルダから実行し、インストール先 exe 自身による削除の経路を通した。12 秒以内にサービス SK700LCD・C:\Program Files\SK700LCD（exe とフォルダ）・HKLM\SOFTWARE\SK700LCD がすべて消え、PawnIO は残った。PendingFileRenameOperations に予約した再起動時削除が残るが、対象はもう無いので再起動時に何も起きない
 
 ## 次にやること
 1. Intel 実機で `sk700lcd.exe test 20 log.txt` を実行し、温度・電力・クロックが HWiNFO と一致するか確認
 2. 再起動・スリープ復帰・USB 抜き差し後も表示が続くか確認（MasterCraft なしの状態で）
 3. PawnIO の無い PC で install.bat の winget 自動導入を確認（この PC では PawnIO 導入済みのため未確認）
-4. uninstall.bat（インストール先 exe の自己削除を含む）を実際に実行して確認（未実施）
 
 ## 未解決の問題・メモ
 - Intel 経路は実機未確認（IntelMSR モジュールは Intel 以外では読み込みを拒否するため AMD 機では試せない）
