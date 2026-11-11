@@ -26,7 +26,7 @@ Copy-Item 'build\sk700lcd.exe' $stage
 Copy-Item 'res\LICENSE-PawnIO.Modules.txt' $stage
 Copy-Item 'LICENSE' (Join-Path $stage 'LICENSE.txt')
 # text files: force CRLF (cmd.exe can mis-handle labels in LF-only batch files)
-foreach ($f in 'install.bat', 'uninstall.bat', 'README.txt') {
+foreach ($f in 'install.bat', 'install_pawnio.ps1', 'uninstall.bat', 'README.txt') {
   $t = [IO.File]::ReadAllText((Join-Path $root "dist\$f"))
   $t = ($t -replace "`r`n", "`n") -replace "`n", "`r`n"
   $enc = if ($f -like '*.txt') { New-Object Text.UTF8Encoding($true) } else { New-Object Text.UTF8Encoding($false) }

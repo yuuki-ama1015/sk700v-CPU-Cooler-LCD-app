@@ -25,7 +25,7 @@ Sudokoo SK700V（CPUクーラー）の液晶に CPU 温度を送るだけの軽�
 PawnIO は署名済みのカーネルドライバで、ハードウェアモニター系ソフトが共通で使う。
 LibreHardwareMonitor（0.9.5 以降）や FanControl などを入れたことがあれば、すでに入っている場合がある。
 
-どちらかの方法で入れる（管理者権限が必要）。
+[配布 zip](https://github.com/yuuki-ama1015/sk700v-CPU-Cooler-LCD-app/releases/latest) の `install.bat` を使えば、無い場合は公式配布元から自動で入る（下記「ビルドとテスト」参照）。手動で入れる場合は、どちらかの方法で入れる（管理者権限が必要）。
 
 ```bat
 winget install namazso.PawnIO
@@ -119,8 +119,9 @@ tools\run_tests.bat    :: レジスタ解読とフレーム生成の単体テス
 powershell -ExecutionPolicy Bypass -File tools\make_release.ps1   :: ビルド・テスト後に配布 zip を作る
 ```
 
-配布 zip（`build\sk700lcd-<版>.zip`）の中身: `sk700lcd.exe`、`install.bat`、`uninstall.bat`、`README.txt`、`LICENSE-PawnIO.Modules.txt`（元ファイルは `dist\`）。
-`install.bat` は管理者に昇格し、PawnIO が無ければ winget で入れてから `sk700lcd.exe install` を実行する。MasterCraft が動いている・入っている場合は注意を表示する。
+配布 zip（`build\sk700lcd-<版>.zip`）の中身: `sk700lcd.exe`、`install.bat`、`install_pawnio.ps1`、`uninstall.bat`、`README.txt`、`LICENSE.txt`、`LICENSE-PawnIO.Modules.txt`（元ファイルは `dist\`）。
+`install.bat` は管理者に昇格し、PawnIO が無ければ `install_pawnio.ps1` で公式リリース（`github.com/namazso/PawnIO.Setup/releases/latest`）の `PawnIO_setup.exe` をダウンロードし、Authenticode 署名が有効で発行先が `O=namazso` であることを確かめてから `-install -silent` で入れる。PawnIO が入っているかは、サービス `PawnIO` が動作中（RUNNING）かで判定する（アンインストール後も停止状態のサービス登録が残ることがあるため）。PawnIO のインストーラーが再起動を求めた場合は、再起動すれば表示が始まると案内する。そのあと `sk700lcd.exe install` を実行する。MasterCraft が動いている・入っている場合は注意を表示する。zip を展開せずに実行された場合（横に `sk700lcd.exe` が無い）は展開するよう案内して終わる。
+winget は使わない（Windows 10 の一部や初期状態の PC、UAC で別の管理者アカウントに昇格した場合などに使えないことがあるため）。
 `uninstall.bat` は `sk700lcd.exe uninstall` を実行する。
 
 単体テストは、Intel のレジスタ解読（TjMax・温度・倍率・電力単位）と、MasterCraft が実際に送っていたフレームとの一致を確認する。

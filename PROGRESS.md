@@ -48,17 +48,27 @@
 - 2026-11-10 GitHub Releases に v0.1.0 を公開（sk700lcd-0.1.0.zip、26KB、ダウンロードしてハッシュ一致を確認）
 - 2026-11-10 ライセンスを MIT に決定（ユーザーが一任）。LICENSE を追加（res/ の PawnIO モジュールは対象外で LGPL-2.1 と明記）、README と配布物の README.txt に記載、make_release.ps1 が LICENSE.txt を同梱。v0.1.0 の zip は公開済みの exe のまま LICENSE.txt と更新した README.txt を加えて差し替え（SHA256 1818EF0F62E980FFFD9E02A2817C299C5BD2D25A8BCAE821217908EE6369A39D、ダウンロードして一致を確認）、リリースノートも更新
 - 2026-11-10 GitHub がライセンスを「Other」と判定していたため、LICENSE を MIT の原文だけにした（res/ の PawnIO モジュールが LGPL-2.1 である注記は README の「ライセンス」節と res/LICENSE-PawnIO.Modules.txt に残る）。公開済み v0.1.0 の zip 内 LICENSE.txt は注記付きのままだが内容に矛盾はないので差し替えない
-- 2026-11-10 uninstall.bat を実機で確認: exe の無いフォルダから実行し、インストール先 exe 自身による削除の経路を通した。12 秒以内にサービス SK700LCD・C:\Program Files\SK700LCD（exe とフォルダ）・HKLM\SOFTWARE\SK700LCD がすべて消え、PawnIO は残った。PendingFileRenameOperations に予約した再起動時削除が残るが、対象はもう無いので再起動時に何も起きない
+- 2026-11-10 uninstall.bat を実機で確認: exe の無いフォルダから実行し、インストール先 exe 自身による削除の経路を通した。12 秒以内にサービス SK700LCD・C:\Program Files\SK700LCD（exe とフォルダ）・HKLM\SOFTWARE\SK700LCD がすべて消え、PawnIO は残った。PendingFileRenameOperations に予約した再起動時削除が残る（入れ直すと再起動で exe が消える問題があり、11-11 に修正）
+- 2026-11-10 v0.1.1 の配布物を作成（未公開・未マージ、ブランチ claude/pawnio-auto-install）。install.bat の PawnIO 導入を winget から「公式リリースの PawnIO_setup.exe を直接ダウンロード → 署名確認 → `-install -silent`」（dist\install_pawnio.ps1）に変更。あわせて: zip を展開せずに実行したら案内して終了、PawnIO の有無は「サービスが RUNNING か」で判定、インストーラーが 3010 を返すか入ったのに動いていなければ再起動を案内、管理者判定を `net session` から `fltmc` に変更（Server サービスが止まっている PC で昇格を繰り返さないため。再昇格は 1 回だけ）、昇格時のパスを環境変数で渡す（空白・括弧・アポストロフィを含むパスで確認）、文字列検索を System32 の findstr のフルパスに変更（PATH 上の GNU find と取り違えないため）
+- 2026-11-10 確認できたこと: PawnIO の分岐 7 通りをスタブで実行して期待どおり（動作中 / 無し→導入 / 3010 / 失敗 / 停止中のまま / 停止中→動作 / 終了 0 だがサービス無し）。Windows PowerShell 5.1 でのダウンロード（1 秒、3.4MB）と署名確認（Valid、O=namazso）。展開せずに実行したときの案内。単体テスト 49 件
+- 2026-11-10 この PC の PawnIO を `PawnIO_setup.exe -uninstall -silent`（2.2.0 のインストーラー）で外そうとしたところ、終了コード 0 で「アプリ一覧の登録」と「デバイス ROOT\PAWNIO\0000」は消えたが、ドライバは再起動まで読み込まれたまま残った（setupapi.dev.log: Query-removal was vetoed, PNP_VetoLegacyDevice / Setting needs reboot）。サービス PawnIO も RUNNING のまま。PawnIO は再起動しないと外れない、という点が分かった
+- 2026-11-11 再起動したところ、PawnIO が止まったうえ、入れ直していた sk700lcd.exe も消えていた。原因は 2026-11-10 の uninstall 確認で予約された再起動時削除（PendingFileRenameOperations）が、入れ直した後も残っていたこと（11-10 の「再起動時に何も起きない」は誤り）。`install` がこの予約（exe とフォルダの削除）を取り消すように修正
+- 2026-11-11 PawnIO も sk700lcd も無い状態で、作り直した sk700lcd-0.1.1.zip を展開して install.bat を実行（ユーザー操作）。PawnIO 2.2.0 を公式リリースからダウンロード→署名確認→インストール→サービス開始まで通った（PawnIO・SK700LCD とも RUNNING、一時ファイルは残らず、WS 1.1MB）
+- 2026-11-11 予約取り消しを確認: インストール先 exe で uninstall → PendingFileRenameOperations に exe とフォルダの 2 件 → 新しい exe で install →「再起動時の削除予約を取り消しました」と表示され 0 件、サービス RUNNING
+- 2026-11-11 v0.1.1 を main にマージし、GitHub Releases に公開（ユーザー承認済み）
 
 ## 次にやること
-1. Intel 実機で `sk700lcd.exe test 20 log.txt` を実行し、温度・電力・クロックが HWiNFO と一致するか確認
-2. 再起動・スリープ復帰・USB 抜き差し後も表示が続くか確認（MasterCraft なしの状態で）
-3. PawnIO の無い PC で install.bat の winget 自動導入を確認（この PC では PawnIO 導入済みのため未確認）
+1. 再起動後も表示が続くか確認（修正後の再起動はまだ。PendingFileRenameOperations は空なので exe は消えない見込み）
+2. スリープ復帰・USB 抜き差し後も表示が続くか確認
+3. Intel 実機で `sk700lcd.exe test 20 log.txt` を実行し、温度・電力・クロックが HWiNFO と一致するか確認
+4. PawnIO を一度も入れたことのない PC（ドライバストアに古い版が残っていない状態）でも install.bat を確認できるとなおよい
 
 ## 未解決の問題・メモ
 - Intel 経路は実機未確認（IntelMSR モジュールは Intel 以外では読み込みを拒否するため AMD 機では試せない）
 - Intel のパッケージ温度は LHM / Linux coretemp と同じく bit31（Reading Valid）を確認している。立たない CPU があればコア温度にフォールバックする
-- PawnIO は同梱しない（カーネルドライバは要インストールで、同梱しても手間が減るだけ。公式配布なら更新され、他ソフトとの版の食い違いも起きない）
+- PawnIO は同梱しない（カーネルドライバは要インストールで、同梱しても手間が減るだけ。公式配布なら更新され、他ソフトとの版の食い違いも起きない）。代わりに install.bat が公式リリースの最新版をダウンロードして入れる。winget は使えない PC があるので使わない
+- PawnIO_setup.exe のソースは公開されていない（GitHub の PawnIO.Setup は README のみ）。`-install -silent` / `-uninstall -silent` と成功コード 3010 は winget のマニフェスト（namazso.PawnIO 2.2.0）による
+- PawnIO をアンインストールしても、ドライバは再起動まで動き続ける。再起動前は `sc query PawnIO` が RUNNING を返すので、install.bat は「導入済み」と判定する（再起動後に表示が止まる）。README のアンインストール節にこの注意を書くか検討
 - 64 論理プロセッサを超える CPU（プロセッサグループ 2 以上）はグループ 0 のコアしか見ていない
 - PW2 の意味は不明（floor(PW × 0.9529) ≒ PW ÷ 1.05 で記録 24 組すべてに一致、という数値の対応のみ）
 - 画面オフ時のフレーム B の固定値（100W / 50W / 60.0 / 40% / 3600MHz）の意味は不明。MasterCraft と同じものをそのまま送っている

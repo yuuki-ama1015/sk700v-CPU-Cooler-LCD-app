@@ -3,9 +3,17 @@ rem sk700lcd uninstaller: removes the SK700LCD service, the installed exe and it
 setlocal
 cd /d "%~dp0"
 
-net session >nul 2>&1
+rem fltmc needs administrator rights and, unlike "net session", no running Server service.
+fltmc >nul 2>&1
 if errorlevel 1 (
-  powershell -NoProfile -Command "Start-Process -FilePath '%~f0' -Verb RunAs"
+  if "%~1"=="elevated" (
+    echo [ERROR] Administrator rights are required. Right-click uninstall.bat and choose "Run as administrator".
+    echo.
+    pause
+    exit /b 1
+  )
+  set "SK700_SELF=%~f0"
+  powershell -NoProfile -Command "Start-Process -FilePath $env:SK700_SELF -ArgumentList elevated -Verb RunAs"
   exit /b
 )
 

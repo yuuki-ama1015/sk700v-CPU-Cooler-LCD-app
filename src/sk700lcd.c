@@ -732,6 +732,49 @@ static void stop_service(SC_HANDLE svc) {
     }
 }
 
+// s が tail で終わるか (大文字小文字を区別しない)
+static BOOL ends_with_i(const WCHAR *s, const WCHAR *tail) {
+    int n = lstrlenW(s), m = lstrlenW(tail);
+    return n >= m && lstrcmpiW(s + n - m, tail) == 0;
+}
+
+// uninstall が予約した「再起動時の削除」を取り消す (残っていると入れ直した exe が再起動で消える)
+// PendingFileRenameOperations は (元, 先) の組の REG_MULTI_SZ。先が空の組が削除の予約
+static void cancel_pending_delete(const WCHAR *exe, const WCHAR *dir) {
+    static const WCHAR *const names[2] = {L"PendingFileRenameOperations", L"PendingFileRenameOperations2"};
+    HKEY key;
+    int k;
+    if (RegOpenKeyExW(HKEY_LOCAL_MACHINE, L"SYSTEM\\CurrentControlSet\\Control\\Session Manager", 0,
+                      KEY_QUERY_VALUE | KEY_SET_VALUE | KEY_WOW64_64KEY, &key) != ERROR_SUCCESS) return;
+    for (k = 0; k < 2; k++) {
+        DWORD type, size = 0, cnt, removed = 0;
+        WCHAR *buf, *out, *p, *q;
+        if (RegQueryValueExW(key, names[k], NULL, &type, NULL, &size) != ERROR_SUCCESS || type != REG_MULTI_SZ || size == 0) continue;
+        buf = (WCHAR *)HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, size + 4 * sizeof(WCHAR));
+        out = (WCHAR *)HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, size + 4 * sizeof(WCHAR));
+        if (buf && out && RegQueryValueExW(key, names[k], NULL, &type, (BYTE *)buf, &size) == ERROR_SUCCESS) {
+            cnt = size / sizeof(WCHAR);
+            p = buf;
+            q = out;
+            while ((DWORD)(p - buf) < cnt && *p) {
+                WCHAR *src = p, *dst = p + lstrlenW(p) + 1;
+                p = dst + lstrlenW(dst) + 1;
+                if (!*dst && (ends_with_i(src, exe) || ends_with_i(src, dir))) { removed++; continue; }
+                lstrcpyW(q, src); q += lstrlenW(src) + 1;
+                lstrcpyW(q, dst); q += lstrlenW(dst) + 1;
+            }
+            if (removed) {
+                if (q == out) RegDeleteValueW(key, names[k]);
+                else { *q++ = 0; RegSetValueExW(key, names[k], 0, REG_MULTI_SZ, (const BYTE *)out, (DWORD)((q - out) * sizeof(WCHAR))); }
+                out_w(L"再起動時の削除予約を取り消しました (前回のアンインストールの分)\r\n");
+            }
+        }
+        if (buf) HeapFree(GetProcessHeap(), 0, buf);
+        if (out) HeapFree(GetProcessHeap(), 0, out);
+    }
+    RegCloseKey(key);
+}
+
 static int do_install(void) {
     WCHAR self[MAX_PATH], dir[MAX_PATH], exe[MAX_PATH], cmd[MAX_PATH + 2];
     SC_HANDLE scm, svc;
@@ -749,6 +792,7 @@ static int do_install(void) {
     svc = OpenServiceW(scm, SVC_NAME, SERVICE_ALL_ACCESS);
     if (svc) stop_service(svc);
 
+    cancel_pending_delete(exe, dir);
     CreateDirectoryW(dir, NULL);
     if (lstrcmpiW(self, exe) != 0 && !CopyFileW(self, exe, FALSE)) {
         print_err(L"Program Files へのコピーに失敗");
@@ -794,7 +838,7 @@ static int do_install(void) {
 }
 
 // 実行中の exe 自身は消せないので、このプロセスの終了後に cmd.exe で消す
-// (念のため再起動時の削除も予約しておく。先に消えていれば何もしない)
+// (念のため再起動時の削除も予約しておく。入れ直した場合は install がこの予約を取り消す)
 static void delete_after_exit(const WCHAR *exe, const WCHAR *dir) {
     WCHAR sys[MAX_PATH], cmd[MAX_PATH * 3 + 128];
     STARTUPINFOW si;
