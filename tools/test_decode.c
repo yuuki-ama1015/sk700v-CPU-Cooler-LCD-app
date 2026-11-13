@@ -14,6 +14,10 @@ static void check_d(const char *name, double got, double want) {
     g_total++;
     if (fabs(got - want) > 1e-9) { g_fail++; printf("FAIL %s: got %.6f want %.6f\n", name, got, want); }
 }
+static void check_i(const char *name, int got, int want) {
+    g_total++;
+    if (got != want) { g_fail++; printf("FAIL %s: got %d want %d\n", name, got, want); }
+}
 static void check_hex(const char *name, const BYTE *got, const char *wantHex, int n) {
     char buf[600];
     int i;
@@ -90,6 +94,60 @@ int main(void) {
     make_report(rep, 64, a, 2);
     g_total++;
     { int i, z = 1; for (i = 9; i < 64; i++) if (rep[i]) z = 0; if (!z) { g_fail++; printf("FAIL padding\n"); } }
+
+    // --- Sleep / resume handling (power_event + gate_tick + read_sensors) ---
+    // No device is open here: hid_close / pio_close are no-ops and nothing is written to the registry.
+    InitializeCriticalSection(&g_ioLock);
+    {
+        int i, skipped;
+        check_i("gate: runs while awake", gate_tick(), 1);
+        g_temp = 55.0;
+        power_event(PBT_APMSUSPEND);
+        check_i("suspend: flag set", (int)g_suspended, 1);
+        check_d("suspend: stale temperature dropped", g_temp, -1.0);
+        for (i = 0, skipped = 0; i < 10; i++) skipped += !gate_tick();
+        check_i("suspend: no device access while suspended", skipped, 10);
+        g_temp = 60.0;
+        for (i = 0; i < TEMP_FAIL_MAX + 2; i++) read_sensors();
+        check_d("suspend: read_sensors does nothing", g_temp, 60.0);
+
+        power_event(PBT_APMRESUMEAUTOMATIC);
+        check_i("resume: flag cleared", (int)g_suspended, 0);
+        for (i = 0, skipped = 0; i < RESUME_HOLD_SECONDS; i++) skipped += !gate_tick();
+        check_i("resume: waits RESUME_HOLD_SECONDS", skipped, RESUME_HOLD_SECONDS);
+        check_i("resume: runs after the wait", gate_tick(), 1);
+        power_event(PBT_APMRESUMESUSPEND);  // second notification, sent when the user is present
+        check_i("resume: second notification ignored", gate_tick(), 1);
+        power_event(PBT_APMRESUMEAUTOMATIC);  // resume without a suspend
+        check_i("resume without suspend: ignored", gate_tick(), 1);
+
+        // the resume notification never arrives
+        power_event(PBT_APMSUSPEND);
+        for (i = 0, skipped = 0; i < SUSPEND_MAX_SECONDS; i++) skipped += !gate_tick();
+        check_i("lost resume: waits SUSPEND_MAX_SECONDS", skipped, SUSPEND_MAX_SECONDS);
+        check_i("lost resume: then runs", gate_tick(), 1);
+        check_i("lost resume: flag cleared", (int)g_suspended, 0);
+
+        // sleeping again during the wait after a resume
+        power_event(PBT_APMSUSPEND);
+        power_event(PBT_APMRESUMEAUTOMATIC);
+        gate_tick();
+        power_event(PBT_APMSUSPEND);
+        check_i("re-suspend during the wait: no access", gate_tick(), 0);
+        power_event(PBT_APMRESUMEAUTOMATIC);
+        for (i = 0, skipped = 0; i < RESUME_HOLD_SECONDS; i++) skipped += !gate_tick();
+        check_i("re-suspend: full wait again", skipped, RESUME_HOLD_SECONDS);
+        check_i("re-suspend: runs after the wait", gate_tick(), 1);
+
+        // the temperature cannot be read (PawnIO is not open in this test)
+        g_temp = 60.0;
+        g_tempFails = 0;
+        for (i = 0; i < TEMP_FAIL_MAX - 1; i++) read_sensors();
+        check_d("temp failures: last value kept below the limit", g_temp, 60.0);
+        read_sensors();
+        check_d("temp failures: value dropped at the limit", g_temp, -1.0);
+        check_i("temp failures: reopen PawnIO at once", g_pioRetry, 0);
+    }
 
     printf("%d/%d passed\n", g_total - g_fail, g_total);
     return g_fail ? 1 : 0;

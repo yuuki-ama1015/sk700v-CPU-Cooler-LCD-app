@@ -4,8 +4,11 @@
 // runs (so every node-hid write / read is logged), then resumes the app. Log lines are
 // collected in globalThis.__hidlog inside MasterCraft and pulled out with drain().
 const { spawn, execSync } = require('child_process');
+const path = require('path');
 
-const MASTERCRAFT_EXE = 'C:\\MasterCraft\\MasterCraft.exe';
+// Installed copy by default. To analyse without installing, extract the installer
+// (7z e MasterCraft-x.y.z-setup.exe $PLUGINSDIR\app-64.7z, then 7z x app-64.7z) and set MC_EXE.
+const MASTERCRAFT_EXE = process.env.MC_EXE || 'C:\\MasterCraft\\MasterCraft.exe';
 
 // Hooks the node-hid native binding (HID.node). Its methods are non-writable, so a fake
 // prototype + instance proxy is used. Logs writes, reads (with data) and device opens.
@@ -97,7 +100,7 @@ function masterCraftRunning() {
 async function launch({ port = 9229, args = [], log = () => { } } = {}) {
   // MasterCraft is single-instance: a second copy just hands over to the running one and exits.
   if (masterCraftRunning()) throw new Error('MasterCraft is already running; close it first (tray icon -> exit, or taskkill /IM MasterCraft.exe)');
-  const child = spawn(MASTERCRAFT_EXE, [`--inspect-brk=${port}`, ...args], { detached: true, stdio: 'ignore', cwd: 'C:\\MasterCraft' });
+  const child = spawn(MASTERCRAFT_EXE, [`--inspect-brk=${port}`, ...args], { detached: true, stdio: 'ignore', cwd: path.dirname(MASTERCRAFT_EXE) });
   child.unref();
   log('# spawned pid ' + child.pid);
   const ws = new WebSocket(await getWsUrl(port));

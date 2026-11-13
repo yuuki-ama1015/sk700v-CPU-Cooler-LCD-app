@@ -25,6 +25,11 @@ https://github.com/yuuki-ama1015/sk700v-CPU-Cooler-LCD-app
   "C:\Program Files\SK700LCD\sk700lcd.exe" set screen on|off  画面表示
   "C:\Program Files\SK700LCD\sk700lcd.exe" set alert on|off   温度警告（90℃超で赤く点滅）
 
+■ 液晶が真っ暗のまま点かなくなったら
+  PC の電源を完全に切ってください（シャットダウン → 電源ユニットのスイッチを切るか
+  コンセントを抜く → 30 秒待ってから起動）。再起動では戻りません。
+  （v0.1.1 までは、スリープすると液晶がこの状態になることがありました。v0.1.2 で修正）
+
 ■ アンインストール
   uninstall.bat をダブルクリック → UAC で「はい」
   （または管理者で "C:\Program Files\SK700LCD\sk700lcd.exe" uninstall）

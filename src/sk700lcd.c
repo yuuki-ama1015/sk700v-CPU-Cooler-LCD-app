@@ -513,6 +513,9 @@ static BOOL hid_open(void) {
     return g_hid != INVALID_HANDLE_VALUE;
 }
 
+// 1 回の書き込みを待つ上限。正常なら数 ms で終わる。スリープの通知側がこの時間だけ待たされるので短くしてある
+#define HID_WRITE_TIMEOUT_MS 400
+
 static BOOL hid_write(const BYTE *buf, DWORD len) {
     OVERLAPPED ov;
     DWORD wr = 0;
@@ -521,7 +524,7 @@ static BOOL hid_write(const BYTE *buf, DWORD len) {
     ResetEvent(g_hidEvent);
     if (!WriteFile(g_hid, buf, len, NULL, &ov)) {
         if (GetLastError() != ERROR_IO_PENDING) return FALSE;
-        if (WaitForSingleObject(g_hidEvent, 1000) != WAIT_OBJECT_0) {
+        if (WaitForSingleObject(g_hidEvent, HID_WRITE_TIMEOUT_MS) != WAIT_OBJECT_0) {
             CancelIo(g_hid);
             GetOverlappedResult(g_hid, &ov, &wr, TRUE);
             return FALSE;
@@ -557,6 +560,32 @@ static DWORD reg_get(HKEY k, const WCHAR *name, DWORD def) {
     return def;
 }
 
+// スリープ・復帰の記録 (動作確認用。sk700lcd config で表示)。設定と同じキーなので uninstall で消える
+//   LastSuspend / LastResume / LastResumeSend : その時刻。FILETIME (REG_QWORD)
+//   SuspendCount      : スリープの通知を処理した回数
+//   LastSuspendWaitMs : 通知を受けてから、液晶と PawnIO の接続を閉じ終わるまでの時間 [ms]
+static void record_event(const WCHAR *name, BOOL isSuspend, DWORD waitMs) {
+#ifdef SK700_TEST
+    (void)name; (void)isSuspend; (void)waitMs;  // 単体テストではレジストリに書かない
+#else
+    HKEY k;
+    FILETIME ft;
+    DWORD n, sz = sizeof n, type;
+    if (RegCreateKeyExW(HKEY_LOCAL_MACHINE, CFG_KEY, 0, NULL, 0, KEY_QUERY_VALUE | KEY_SET_VALUE | KEY_WOW64_64KEY, NULL, &k, NULL) != ERROR_SUCCESS)
+        return;
+    GetSystemTimeAsFileTime(&ft);
+    RegSetValueExW(k, name, 0, REG_QWORD, (const BYTE *)&ft, sizeof ft);
+    if (isSuspend) {
+        if (RegQueryValueExW(k, L"SuspendCount", NULL, &type, (BYTE *)&n, &sz) != ERROR_SUCCESS || type != REG_DWORD) n = 0;
+        n++;
+        RegSetValueExW(k, L"SuspendCount", 0, REG_DWORD, (const BYTE *)&n, sizeof n);
+        RegSetValueExW(k, L"LastSuspendWaitMs", 0, REG_DWORD, (const BYTE *)&waitMs, sizeof waitMs);
+    }
+    RegFlushKey(k);  // 復帰に失敗して電源を切られても残るように、すぐディスクへ書く
+    RegCloseKey(k);
+#endif
+}
+
 static void config_load(void) {
     HKEY k;
     CONFIG c = {1, 1};
@@ -572,48 +601,132 @@ static void config_load(void) {
 // メインループ
 // ---------------------------------------------------------------------------
 static HANDLE g_stop;
-static volatile LONG g_reopen;
 static double g_temp = -1, g_power, g_mhz;
 static BOOL g_verbose;
 
+// スリープ対策
+// ・送信中に Windows がスリープして USB がサスペンドされると、SK700V の液晶はバックライトごと消えて固まり、
+//   再起動しても戻らない (電源を完全に切ると戻る)。MasterCraft はスリープ前に液晶との接続を閉じて送信を止め、
+//   復帰後に開き直している。
+// ・サービスが PawnIO (2.2.0) 経由で CPU を読み続けたままスリープすると、開発機 (Ryzen 7 5800X) は復帰できなかった
+//   (3 回続けて。マザーボードの DRAM ランプが点いたまま)。サービスを止めた状態では復帰できた。
+// そこでスリープの通知を受けたら、センサーの読み取りと送信をすぐやめて PawnIO と液晶の接続を閉じる
+// (デバイスに一切触らない = サービスを止めたのと同じ状態にする)。復帰後は少し待ってから開き直して再開する。
+#define RESUME_HOLD_SECONDS 3    // 復帰の通知から再開までの秒数
+#define SUSPEND_MAX_SECONDS 120  // 復帰の通知が来なかったときの保険 (起きている間にこの秒数たったら再開)
+#define TEMP_FAIL_MAX 5          // 温度がこの回数続けて読めなければ、PawnIO を開き直す
+static CRITICAL_SECTION g_ioLock;  // PawnIO と液晶へのアクセス、および下の状態を守る
+static volatile LONG g_suspended;  // スリープの通知を受けた (復帰するまでデバイスに触らない)。ロックなしでも読む
+static int g_holdTicks;            // 復帰後、再開を待つ残り秒数
+static int g_suspendedTicks;       // g_suspended のまま過ぎた秒数
+static int g_hidRetry, g_pioRetry; // 開き直しまでの残り秒数
+static int g_tempFails;            // 温度を続けて読めなかった回数
+static BOOL g_resumeSendPending;   // 復帰後、最初に送信できた時刻を記録する
+
+// 復帰 (g_ioLock を持った状態で呼ぶ)
+static void resume_locked(int holdSeconds) {
+    g_holdTicks = holdSeconds;
+    g_hidRetry = g_pioRetry = g_tempFails = 0;  // 待ち時間が明けたらすぐ開き直す
+    g_resumeSendPending = TRUE;
+    InterlockedExchange(&g_suspended, 0);
+}
+
+// スリープ・復帰の通知 (PBT_APM*)。サービスの制御ハンドラか、コンソール実行時の通知コールバックから呼ばれる
+static void power_event(DWORD type) {
+    if (type == PBT_APMSUSPEND) {
+        DWORD t0 = GetTickCount();
+        // 先にフラグを立てる。tick は処理の区切りごとにこれを見て抜けるので、ロックは長くても 1 操作分で空く
+        InterlockedExchange(&g_suspended, 1);
+        EnterCriticalSection(&g_ioLock);
+        hid_close();
+        pio_close();
+        g_temp = -1;  // 復帰後、読み直せるまで古い温度を送らない
+        g_suspendedTicks = 0;
+        LeaveCriticalSection(&g_ioLock);
+        record_event(L"LastSuspend", TRUE, GetTickCount() - t0);
+    } else if (type == PBT_APMRESUMEAUTOMATIC || type == PBT_APMRESUMESUSPEND) {
+        // 復帰では AUTOMATIC のあと、ユーザーの操作があれば RESUMESUSPEND も届く。最初の 1 回だけ処理する
+        BOOL first;
+        EnterCriticalSection(&g_ioLock);
+        first = g_suspended != 0;
+        if (first) resume_locked(RESUME_HOLD_SECONDS);
+        LeaveCriticalSection(&g_ioLock);
+        if (first) record_event(L"LastResume", FALSE, 0);
+    }
+}
+
+// この 1 秒にデバイスへ触ってよいか (g_ioLock を持った状態で、1 秒に 1 回呼ぶ)
+static BOOL gate_tick(void) {
+    if (g_suspended) {
+        if (++g_suspendedTicks <= SUSPEND_MAX_SECONDS) return FALSE;
+        resume_locked(0);  // 復帰の通知が来なかった
+    }
+    if (g_holdTicks > 0) { g_holdTicks--; return FALSE; }
+    return TRUE;
+}
+
+// センサーを読む (g_ioLock を持った状態で呼ぶ)。スリープの通知が来たら途中でやめる
+static void read_sensors(void) {
+    double v;
+    if (g_suspended) return;
+    if (read_temp(&v)) {
+        g_temp = v;
+        g_tempFails = 0;
+    } else if (++g_tempFails >= TEMP_FAIL_MAX) {
+        // 読めない状態が続く: 古い温度を出し続けないよう送信を止め、PawnIO を開き直す
+        g_tempFails = 0;
+        g_temp = -1;
+        pio_close();
+        g_pioRetry = 0;
+        return;
+    }
+    if (!g_suspended && read_power(&v)) g_power = v;
+    if (!g_suspended && read_clock(&v)) g_mhz = v;
+}
+
 static void tick(int n) {
-    static int hidRetry, pioRetry;
-    double usage = read_usage(), v;
-    BOOL lcdOk = FALSE;
+    double usage = read_usage();
+    BOOL lcdOk = FALSE, fresh = FALSE, resumed = FALSE;
+    int state;  // 0 = 通常, 1 = スリープ中, 2 = 復帰待ち
 
     if (InterlockedExchange(&g_reload, 0)) config_load();
-    if (g_pio == INVALID_HANDLE_VALUE) {
-        if (pioRetry-- <= 0) { pioRetry = 10; pio_init(); }
-    }
-    if (g_pio != INVALID_HANDLE_VALUE) {
-        if (read_temp(&v)) g_temp = v;
-        if (read_power(&v)) g_power = v;
-        if (read_clock(&v)) g_mhz = v;
-    }
 
-    if (InterlockedExchange(&g_reopen, 0)) { hid_close(); hidRetry = 0; }
-    if (g_hid == INVALID_HANDLE_VALUE && hidRetry-- <= 0) {
-        hidRetry = 3;
-        hid_open();
-    }
-
-    if (g_hid != INVALID_HANDLE_VALUE && (!g_cfg.screen || g_temp >= 0)) {
-        if (g_cfg.screen) {
-            BYTE a[2];
-            BYTE b[13];
-            a[0] = 0x03;
-            a[1] = (BYTE)g_cfg.alert;  // フレーム A = 温度警告 (03 01 オン / 03 00 オフ)
-            make_sensor_data(b, g_temp, g_power, usage, g_mhz);
-            lcdOk = send_frame(a, 2);
-            if (lcdOk) {
-                WaitForSingleObject(g_stop, 16);
-                lcdOk = send_frame(b, 13);
-            }
-        } else {
-            lcdOk = send_frame(SCREEN_OFF_DATA, 13);
+    EnterCriticalSection(&g_ioLock);
+    state = g_suspended ? 1 : (g_holdTicks > 0 ? 2 : 0);
+    if (gate_tick()) {
+        // 以下、デバイスに触る前に毎回 g_suspended を確かめる (通知側がロックの空きを待っている)
+        if (g_pio == INVALID_HANDLE_VALUE && !g_suspended && g_pioRetry-- <= 0) {
+            g_pioRetry = 10;
+            fresh = pio_init();  // 消費電力は次の 1 秒から出る (差分に基準値が必要)
         }
-        if (!lcdOk) { hid_close(); hidRetry = 1; }
+        if (g_pio != INVALID_HANDLE_VALUE) read_sensors();
+        if (g_hid == INVALID_HANDLE_VALUE && !g_suspended && g_hidRetry-- <= 0) {
+            g_hidRetry = 3;
+            hid_open();
+        }
+
+        // PawnIO を開いた直後の 1 回は送らない (消費電力が 0W や古い値のまま出るのを避ける)
+        if (g_hid != INVALID_HANDLE_VALUE && !g_suspended && !fresh && (!g_cfg.screen || g_temp >= 0)) {
+            if (g_cfg.screen) {
+                BYTE a[2];
+                BYTE b[13];
+                a[0] = 0x03;
+                a[1] = (BYTE)g_cfg.alert;  // フレーム A = 温度警告 (03 01 オン / 03 00 オフ)
+                make_sensor_data(b, g_temp, g_power, usage, g_mhz);
+                lcdOk = send_frame(a, 2);
+                if (lcdOk) {
+                    WaitForSingleObject(g_stop, 16);
+                    lcdOk = send_frame(b, 13);
+                }
+            } else {
+                lcdOk = send_frame(SCREEN_OFF_DATA, 13);
+            }
+            if (!lcdOk) { hid_close(); g_hidRetry = 1; }
+        }
+        if (lcdOk && g_resumeSendPending) { g_resumeSendPending = FALSE; resumed = TRUE; }
     }
+    LeaveCriticalSection(&g_ioLock);
+    if (resumed) record_event(L"LastResumeSend", FALSE, 0);
 
     if (g_verbose) {
         SB s;
@@ -623,7 +736,8 @@ static void tick(int n) {
         sb_s(&s, L"  "); sb_f1(&s, g_power); sb_s(&s, L"W  ");
         sb_f1(&s, usage); sb_s(&s, L"%  ");
         sb_i(&s, iceil(g_mhz)); sb_s(&s, L"MHz  LCD:");
-        sb_s(&s, lcdOk ? L"OK" : (g_hid == INVALID_HANDLE_VALUE ? L"未接続" : (g_temp < 0 ? L"温度待ち" : L"送信失敗")));
+        sb_s(&s, lcdOk ? L"OK" : (state == 1 ? L"スリープ中" : (state == 2 ? L"復帰待ち" :
+                 (g_hid == INVALID_HANDLE_VALUE ? L"未接続" : (g_temp < 0 ? L"温度待ち" : (fresh ? L"準備中" : L"送信失敗"))))));
         if (g_pio == INVALID_HANDLE_VALUE) sb_s(&s, L"  (PawnIO 未接続)");
         if (!g_cfg.screen) sb_s(&s, L"  [画面オフ]");
         sb_s(&s, L"\r\n");
@@ -678,7 +792,7 @@ static DWORD WINAPI svc_ctrl(DWORD ctrl, DWORD type, LPVOID data, LPVOID ctx) {
         SetEvent(g_stop);
         return NO_ERROR;
     case SERVICE_CONTROL_POWEREVENT:
-        if (type == PBT_APMRESUMEAUTOMATIC || type == PBT_APMRESUMESUSPEND) InterlockedExchange(&g_reopen, 1);
+        power_event(type);
         return NO_ERROR;
     case SERVICE_CONTROL_INTERROGATE:
         return NO_ERROR;
@@ -696,11 +810,15 @@ static void WINAPI svc_main(DWORD argc, LPWSTR *argv) {
     svc_set(SERVICE_START_PENDING, NO_ERROR);
     svc_set(SERVICE_RUNNING, NO_ERROR);
     config_load();
-    pio_init();
+    EnterCriticalSection(&g_ioLock);
+    if (!g_suspended) pio_init();
+    LeaveCriticalSection(&g_ioLock);
     trim_memory();
     run_loop(0);
+    EnterCriticalSection(&g_ioLock);
     hid_close();
     pio_close();
+    LeaveCriticalSection(&g_ioLock);
     svc_set(SERVICE_STOPPED, NO_ERROR);
 }
 
@@ -916,13 +1034,43 @@ static BOOL service_running(void) {
 // ---------------------------------------------------------------------------
 // set / config
 // ---------------------------------------------------------------------------
+static void sb_2(SB *s, int v) { if (v < 10) sb_s(s, L"0"); sb_i(s, v); }
+
+// レジストリの FILETIME (REG_QWORD) を現地時刻で書く。無ければ "-"
+static void sb_regtime(SB *s, HKEY k, const WCHAR *name) {
+    ULONGLONG v;
+    DWORD sz = sizeof v, type;
+    FILETIME ft;
+    SYSTEMTIME u, t;
+    if (!k || RegQueryValueExW(k, name, NULL, &type, (BYTE *)&v, &sz) != ERROR_SUCCESS || type != REG_QWORD) { sb_s(s, L"-"); return; }
+    ft.dwLowDateTime = (DWORD)v;
+    ft.dwHighDateTime = (DWORD)(v >> 32);
+    if (!FileTimeToSystemTime(&ft, &u) || !SystemTimeToTzSpecificLocalTime(NULL, &u, &t)) { sb_s(s, L"-"); return; }
+    sb_i(s, t.wYear); sb_s(s, L"-"); sb_2(s, t.wMonth); sb_s(s, L"-"); sb_2(s, t.wDay); sb_s(s, L" ");
+    sb_2(s, t.wHour); sb_s(s, L":"); sb_2(s, t.wMinute); sb_s(s, L":"); sb_2(s, t.wSecond);
+}
+
 static void print_config(void) {
     SB s;
+    HKEY k = NULL;
+    DWORD n = 0, sz = sizeof n, type;
     config_load();
     s.n = 0;
     sb_s(&s, L"温度警告 (alert)  : "); sb_s(&s, g_cfg.alert ? L"on  (90℃超で赤い温度表示が点滅)" : L"off"); sb_s(&s, L"\r\n");
     sb_s(&s, L"画面 (screen)     : "); sb_s(&s, g_cfg.screen ? L"on" : L"off"); sb_s(&s, L"\r\n");
     out_w(s.b);
+    // スリープ・復帰の記録 (サービスが書く)
+    if (RegOpenKeyExW(HKEY_LOCAL_MACHINE, CFG_KEY, 0, KEY_READ | KEY_WOW64_64KEY, &k) != ERROR_SUCCESS) k = NULL;
+    if (k && (RegQueryValueExW(k, L"SuspendCount", NULL, &type, (BYTE *)&n, &sz) != ERROR_SUCCESS || type != REG_DWORD)) n = 0;
+    s.n = 0;
+    sb_s(&s, L"最後のスリープ    : "); sb_regtime(&s, k, L"LastSuspend"); sb_s(&s, L"  (累計 "); sb_i(&s, (int)n); sb_s(&s, L" 回、接続を閉じるまで ");
+    n = 0; sz = sizeof n;
+    if (k && (RegQueryValueExW(k, L"LastSuspendWaitMs", NULL, &type, (BYTE *)&n, &sz) != ERROR_SUCCESS || type != REG_DWORD)) n = 0;
+    sb_i(&s, (int)n); sb_s(&s, L" ms)\r\n");
+    sb_s(&s, L"最後の復帰        : "); sb_regtime(&s, k, L"LastResume"); sb_s(&s, L"\r\n");
+    sb_s(&s, L"復帰後の送信再開  : "); sb_regtime(&s, k, L"LastResumeSend"); sb_s(&s, L"\r\n");
+    out_w(s.b);
+    if (k) RegCloseKey(k);
 }
 
 // sk700lcd set <alert|screen> <on|off>
@@ -972,6 +1120,31 @@ static BOOL WINAPI console_ctrl(DWORD t) {
     (void)t;
     SetEvent(g_stop);
     return TRUE;
+}
+
+// コンソール実行 (run / test) でもスリープ・復帰の通知を受ける。サービスは制御ハンドラで受けるので使わない。
+// powrprof.dll はここでしか使わないので、サービスには読み込ませない (System32 からのみ読み込む)
+static ULONG CALLBACK console_power_cb(PVOID ctx, ULONG type, PVOID setting) {
+    (void)ctx; (void)setting;
+    power_event(type);
+    return ERROR_SUCCESS;
+}
+
+static BOOL console_power_register(void) {
+    // powrprof.h の DEVICE_NOTIFY_SUBSCRIBE_PARAMETERS / DEVICE_NOTIFY_CALLBACK と同じもの
+    typedef struct { ULONG (CALLBACK *Callback)(PVOID, ULONG, PVOID); PVOID Context; } NOTIFY_PARAMS;
+    enum { NOTIFY_CALLBACK = 2 };
+    typedef DWORD (WINAPI *REGISTER_FN)(DWORD flags, HANDLE recipient, PVOID *registration);
+    static NOTIFY_PARAMS params;  // 登録中は残しておく必要がある
+    HMODULE mod = LoadLibraryExW(L"powrprof.dll", NULL, LOAD_LIBRARY_SEARCH_SYSTEM32);
+    REGISTER_FN reg;
+    PVOID handle = NULL;
+    if (!mod) return FALSE;
+    reg = (REGISTER_FN)(void *)GetProcAddress(mod, "PowerRegisterSuspendResumeNotification");
+    if (!reg) return FALSE;
+    params.Callback = console_power_cb;
+    params.Context = NULL;
+    return reg(NOTIFY_CALLBACK, (HANDLE)&params, &handle) == ERROR_SUCCESS;
 }
 
 // コマンドラインの n 番目 (0=exe) の引数を取り出す (簡易: 空白区切り / ダブルクォート対応)
@@ -1024,6 +1197,7 @@ static int app_main(void) {
     g_qpf = f.QuadPart;
     g_stop = CreateEventW(NULL, TRUE, FALSE, NULL);
     g_hidEvent = CreateEventW(NULL, TRUE, FALSE, NULL);
+    InitializeCriticalSection(&g_ioLock);
     cpu_identify();
 
     if (!get_arg(1, cmd, 32)) {
@@ -1060,10 +1234,13 @@ static int app_main(void) {
         SetConsoleCtrlHandler(console_ctrl, TRUE);
         config_load();
         if (!pio_init()) print_err(L"PawnIO を開けません (管理者権限と PawnIO のインストールが必要)");
+        if (!console_power_register()) out_w(L"注意: スリープの通知を受け取れません。実行中は PC をスリープさせないでください\r\n");
         print_cpu_info();
         run_loop(secs);
+        EnterCriticalSection(&g_ioLock);
         hid_close();
         pio_close();
+        LeaveCriticalSection(&g_ioLock);
         if (!g_outIsConsole && g_out != INVALID_HANDLE_VALUE) CloseHandle(g_out);
         return 0;
     }
